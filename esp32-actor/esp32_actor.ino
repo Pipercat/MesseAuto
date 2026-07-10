@@ -65,7 +65,7 @@ void updatePixels() {
   pixels.show();
 }
 
-void sendStatus() {
+void sendStatus(int8_t eventButton = -1) {
   Serial.print("{\"device\":\"esp32_actor\",\"states\":{");
   Serial.print("\"highBeam\":"); Serial.print(state.highBeam ? "true" : "false");
   Serial.print(",\"lowBeam\":"); Serial.print(state.lowBeam ? "true" : "false");
@@ -79,7 +79,12 @@ void sendStatus() {
     if (i > 0) Serial.print(',');
     Serial.print(buttons[i].stablePressed ? "true" : "false");
   }
-  Serial.println("]}");
+  Serial.print(']');
+  if (eventButton > 0) {
+    Serial.print(",\"event_button\":");
+    Serial.print(eventButton);
+  }
+  Serial.println('}');
 }
 
 void disableHazard() {
@@ -102,9 +107,8 @@ void handleButtonPress(uint8_t index) {
       state.rightIndicator = !state.rightIndicator;
       break;
     case 5:
-      if (state.hazard) {
-        disableHazard();
-      } else {
+      if (state.hazard) disableHazard();
+      else {
         state.hazard = true;
         state.leftIndicator = true;
         state.rightIndicator = true;
@@ -115,7 +119,7 @@ void handleButtonPress(uint8_t index) {
   }
 
   updateOutputs();
-  sendStatus();
+  sendStatus(index + 1);
 }
 
 void readButtons() {
