@@ -5,11 +5,12 @@ import json
 import os
 import threading
 import time
-from dataclasses import dataclass, asdict
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from typing import Any
 
 import serial
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, render_template, request
 
 try:
     import RPi.GPIO as GPIO
@@ -36,17 +37,29 @@ PINS: tuple[PinDefinition, ...] = (
 
 PULSE_SECONDS = float(os.getenv("MESSEAUTO_PULSE_SECONDS", "0.20"))
 SERIAL_BAUDRATE = int(os.getenv("MESSEAUTO_SERIAL_BAUDRATE", "115200"))
+SERIAL_STALE_SECONDS = float(os.getenv("MESSEAUTO_SERIAL_STALE_SECONDS", "5"))
+PORT_SCAN_SECONDS = float(os.getenv("MESSEAUTO_PORT_SCAN_SECONDS", "3"))
 
 app = Flask(__name__)
-state_lock = threading.Lock()
+state_lock = threading.RLock()
 serial_lock = threading.Lock()
+pulse_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="gpio-pulse")
 
 vehicle_state: dict[str, Any] = {
     "outputs": {pin.id: False for pin in PINS},
-    "sensors": {},
+    "hazard": False,
+    "sensors": {"temperature_c": None, "seat_distance_cm": None},
+    "actor_states": {},
     "esp32": {
         "esp32_actor": {"connected": False, "port": None, "last_seen": None},
         "esp32_sensor": {"connected": False, "port": None, "last_seen": None},
+    },
+    "system": {
+        "started_at": time.time(),
+        "pulse_seconds": PULSE_SECONDS,
+        "serial_baudrate": SERIAL_BAUDRATE,
+        "gpio_available": GPIO is not None,
+        "api_requests": 0,
     },
 }
 
@@ -57,7 +70,6 @@ def setup_gpio() -> None:
     if GPIO is None:
         print("[GPIO] RPi.GPIO nicht verfügbar – Simulationsmodus aktiv.")
         return
-
     GPIO.setwarnings(False)
     GPIO.setmode(GPIO.BCM)
     for pin in PINS:
@@ -70,17 +82,22 @@ def pulse_gpio(gpio: int) -> None:
         print(f"[GPIO-SIM] Impuls auf BCM {gpio}")
         time.sleep(PULSE_SECONDS)
         return
+    try:
+        GPIO.output(gpio, GPIO.HIGH)
+        time.sleep(PULSE_SECONDS)
+    finally:
+        GPIO.output(gpio, GPIO.LOW)
 
-    GPIO.output(gpio, GPIO.HIGH)
-    time.sleep(PULSE_SECONDS)
-    GPIO.output(gpio, GPIO.LOW)
+
+def queue_pulse(gpio: int) -> None:
+    pulse_pool.submit(pulse_gpio, gpio)
 
 
 def get_pin(function_id: str) -> PinDefinition | None:
     return next((pin for pin in PINS if pin.id == function_id), None)
 
 
-def set_function(function_id: str, enabled: bool) -> dict[str, Any]:
+def set_function(function_id: str, enabled: bool, *, source: str = "api") -> dict[str, Any]:
     pin = get_pin(function_id)
     if pin is None:
         raise KeyError(function_id)
@@ -92,32 +109,46 @@ def set_function(function_id: str, enabled: bool) -> dict[str, Any]:
             vehicle_state["outputs"][function_id] = enabled
 
     if changed:
-        pulse_gpio(pin.gpio)
+        queue_pulse(pin.gpio)
+        print(f"[STATE] {source}: {function_id} -> {enabled}")
 
-    return {
-        "id": function_id,
-        "enabled": enabled,
-        "changed": changed,
-        "gpio": pin.gpio,
-    }
+    return {"id": function_id, "enabled": enabled, "changed": changed, "gpio": pin.gpio}
 
 
-def toggle_function(function_id: str) -> dict[str, Any]:
+def toggle_function(function_id: str, *, source: str = "api") -> dict[str, Any]:
     with state_lock:
         current = bool(vehicle_state["outputs"].get(function_id, False))
-    return set_function(function_id, not current)
+    return set_function(function_id, not current, source=source)
+
+
+def set_hazard(enabled: bool, *, source: str = "api") -> dict[str, Any]:
+    with state_lock:
+        changed = bool(vehicle_state["hazard"]) != enabled
+        vehicle_state["hazard"] = enabled
+    left = set_function("leftIndicator", enabled, source=source)
+    right = set_function("rightIndicator", enabled, source=source)
+    return {"id": "hazard", "enabled": enabled, "changed": changed, "children": [left, right]}
 
 
 def candidate_serial_ports() -> list[str]:
-    patterns = (
-        "/dev/ttyUSB*",
-        "/dev/ttyACM*",
-        "/dev/serial/by-id/*",
-    )
+    patterns = ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/serial/by-id/*")
     ports: set[str] = set()
     for pattern in patterns:
         ports.update(glob.glob(pattern))
     return sorted(ports)
+
+
+def apply_actor_states(states: dict[str, Any]) -> None:
+    """Übernimmt ESP-Tasterzustände und erzeugt die nötigen Pi-GPIO-Impulse."""
+    for function_id in ("underbody", "lowBeam", "highBeam", "leftIndicator", "rightIndicator", "fan"):
+        value = states.get(function_id)
+        if isinstance(value, bool):
+            set_function(function_id, value, source="esp32_actor")
+
+    hazard = states.get("hazard")
+    if isinstance(hazard, bool):
+        with state_lock:
+            vehicle_state["hazard"] = hazard
 
 
 def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
@@ -127,20 +158,18 @@ def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
 
     now = time.time()
     with state_lock:
-        vehicle_state["esp32"][device] = {
-            "connected": True,
-            "port": port,
-            "last_seen": now,
-        }
+        vehicle_state["esp32"][device] = {"connected": True, "port": port, "last_seen": now}
 
-        if device == "esp32_sensor":
-            vehicle_state["sensors"].update({
-                key: value
-                for key, value in payload.items()
-                if key != "device"
-            })
-        elif device == "esp32_actor" and isinstance(payload.get("states"), dict):
-            vehicle_state["actor_states"] = payload["states"]
+    if device == "esp32_sensor":
+        with state_lock:
+            for key in ("temperature_c", "seat_distance_cm"):
+                if key in payload:
+                    vehicle_state["sensors"][key] = payload[key]
+    elif isinstance(payload.get("states"), dict):
+        states = dict(payload["states"])
+        with state_lock:
+            vehicle_state["actor_states"] = states
+        apply_actor_states(states)
 
 
 def serial_reader(port: str, connection: serial.Serial) -> None:
@@ -155,7 +184,8 @@ def serial_reader(port: str, connection: serial.Serial) -> None:
             except json.JSONDecodeError:
                 print(f"[SERIAL] Ungültiges JSON von {port}: {raw[:120]}")
                 continue
-            handle_serial_message(port, payload)
+            if isinstance(payload, dict):
+                handle_serial_message(port, payload)
     except (serial.SerialException, OSError) as exc:
         print(f"[SERIAL] Verbindung zu {port} beendet: {exc}")
     finally:
@@ -175,18 +205,13 @@ def serial_discovery_loop() -> None:
                     continue
             try:
                 connection = serial.Serial(port, SERIAL_BAUDRATE, timeout=1)
-                time.sleep(1.5)
+                time.sleep(1.2)
             except (serial.SerialException, OSError):
                 continue
-
             with serial_lock:
                 serial_devices[port] = connection
-            threading.Thread(
-                target=serial_reader,
-                args=(port, connection),
-                daemon=True,
-            ).start()
-        time.sleep(3)
+            threading.Thread(target=serial_reader, args=(port, connection), daemon=True).start()
+        time.sleep(PORT_SCAN_SECONDS)
 
 
 def mark_stale_devices() -> None:
@@ -195,16 +220,36 @@ def mark_stale_devices() -> None:
         with state_lock:
             for info in vehicle_state["esp32"].values():
                 last_seen = info.get("last_seen")
-                if last_seen is not None and now - last_seen > 5:
+                if last_seen is not None and now - last_seen > SERIAL_STALE_SECONDS:
                     info["connected"] = False
         time.sleep(1)
 
 
+def snapshot_state() -> dict[str, Any]:
+    with state_lock:
+        return json.loads(json.dumps(vehicle_state))
+
+
+@app.before_request
+def count_request() -> None:
+    if request.path.startswith("/api/"):
+        with state_lock:
+            vehicle_state["system"]["api_requests"] += 1
+
+
+@app.get("/")
+def display():
+    return render_template("index.html")
+
+
+@app.get("/api/health")
+def api_health():
+    return jsonify({"ok": True, "service": "messeauto-pi1", "time": time.time()})
+
+
 @app.get("/api/state")
 def api_state():
-    with state_lock:
-        snapshot = json.loads(json.dumps(vehicle_state))
-    return jsonify(snapshot)
+    return jsonify(snapshot_state())
 
 
 @app.get("/api/pins")
@@ -215,21 +260,24 @@ def api_pins():
 @app.get("/api/sensors")
 def api_sensors():
     with state_lock:
-        sensors = dict(vehicle_state["sensors"])
-    return jsonify(sensors)
+        return jsonify(dict(vehicle_state["sensors"]))
 
 
 @app.get("/api/esp32")
 def api_esp32():
     with state_lock:
-        devices = json.loads(json.dumps(vehicle_state["esp32"]))
-    return jsonify(devices)
+        return jsonify(json.loads(json.dumps(vehicle_state["esp32"])))
 
 
 @app.post("/api/functions/<function_id>/toggle")
 def api_toggle(function_id: str):
     try:
-        result = toggle_function(function_id)
+        if function_id == "hazard":
+            with state_lock:
+                enabled = not bool(vehicle_state["hazard"])
+            result = set_hazard(enabled)
+        else:
+            result = toggle_function(function_id)
     except KeyError:
         return jsonify({"error": "Unbekannte Funktion"}), 404
     return jsonify(result)
@@ -241,10 +289,19 @@ def api_set(function_id: str):
     if not isinstance(payload.get("enabled"), bool):
         return jsonify({"error": "Feld 'enabled' muss true oder false sein"}), 400
     try:
-        result = set_function(function_id, payload["enabled"])
+        result = set_hazard(payload["enabled"]) if function_id == "hazard" else set_function(function_id, payload["enabled"])
     except KeyError:
         return jsonify({"error": "Unbekannte Funktion"}), 404
     return jsonify(result)
+
+
+@app.post("/api/all-off")
+def api_all_off():
+    results = []
+    set_hazard(False)
+    for pin in PINS:
+        results.append(set_function(pin.id, False))
+    return jsonify({"ok": True, "results": results})
 
 
 if __name__ == "__main__":
@@ -254,5 +311,6 @@ if __name__ == "__main__":
     try:
         app.run(host="0.0.0.0", port=5000, threaded=True)
     finally:
+        pulse_pool.shutdown(wait=False, cancel_futures=True)
         if GPIO is not None:
             GPIO.cleanup()
