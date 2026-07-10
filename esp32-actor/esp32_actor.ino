@@ -31,6 +31,7 @@ struct VehicleState {
 
 ButtonState buttons[10];
 VehicleState state;
+String serialCommand;
 uint32_t lastStatusAt = 0;
 uint32_t lastAnimationAt = 0;
 uint32_t animationStep = 0;
@@ -93,6 +94,51 @@ void disableHazard() {
   state.rightIndicator = false;
 }
 
+void setStateByName(const String &name, bool enabled) {
+  if (name == "highBeam") state.highBeam = enabled;
+  else if (name == "lowBeam") state.lowBeam = enabled;
+  else if (name == "underbody") state.underbody = enabled;
+  else if (name == "leftIndicator") state.leftIndicator = enabled;
+  else if (name == "rightIndicator") state.rightIndicator = enabled;
+  else if (name == "fan") state.fan = enabled;
+  else if (name == "hazard") {
+    state.hazard = enabled;
+    state.leftIndicator = enabled;
+    state.rightIndicator = enabled;
+  } else {
+    return;
+  }
+  updateOutputs();
+  sendStatus();
+}
+
+void handleSerialCommand(String command) {
+  command.trim();
+  if (!command.startsWith("SET ")) return;
+
+  const int secondSpace = command.indexOf(' ', 4);
+  if (secondSpace < 0) return;
+
+  const String name = command.substring(4, secondSpace);
+  const String value = command.substring(secondSpace + 1);
+  if (value != "0" && value != "1") return;
+
+  setStateByName(name, value == "1");
+}
+
+void readSerialCommands() {
+  while (Serial.available() > 0) {
+    const char c = static_cast<char>(Serial.read());
+    if (c == '\n') {
+      handleSerialCommand(serialCommand);
+      serialCommand = "";
+    } else if (c != '\r') {
+      if (serialCommand.length() < 96) serialCommand += c;
+      else serialCommand = "";
+    }
+  }
+}
+
 void handleButtonPress(uint8_t index) {
   switch (index) {
     case 0: state.highBeam = !state.highBeam; break;
@@ -139,6 +185,7 @@ void readButtons() {
 
 void setup() {
   Serial.begin(SERIAL_BAUDRATE);
+  serialCommand.reserve(96);
   for (uint8_t pin : BUTTON_PINS) pinMode(pin, INPUT);
   pinMode(FAN_PIN, OUTPUT);
   digitalWrite(FAN_PIN, LOW);
@@ -153,6 +200,7 @@ void setup() {
 }
 
 void loop() {
+  readSerialCommands();
   readButtons();
   updatePixels();
   const uint32_t now = millis();
