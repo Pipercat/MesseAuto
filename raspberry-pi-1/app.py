@@ -104,6 +104,27 @@ def get_pin(function_id: str) -> PinDefinition | None:
     return next((pin for pin in PINS if pin.id == function_id), None)
 
 
+def send_actor_command(function_id: str, enabled: bool) -> bool:
+    """Synchronisiert Display-/API-Befehle mit dem Aktor-ESP."""
+    with state_lock:
+        port = vehicle_state["esp32"]["esp32_actor"].get("port")
+        connected = bool(vehicle_state["esp32"]["esp32_actor"].get("connected"))
+    if not connected or not port:
+        return False
+
+    command = f"SET {function_id} {1 if enabled else 0}\n".encode("utf-8")
+    try:
+        with serial_lock:
+            connection = serial_devices.get(port)
+            if connection is None or not connection.is_open:
+                return False
+            connection.write(command)
+            connection.flush()
+        return True
+    except (serial.SerialException, OSError):
+        return False
+
+
 def set_function(function_id: str, enabled: bool, *, source: str = "api") -> dict[str, Any]:
     pin = get_pin(function_id)
     if pin is None:
@@ -115,6 +136,8 @@ def set_function(function_id: str, enabled: bool, *, source: str = "api") -> dic
             vehicle_state["outputs"][function_id] = enabled
     if changed:
         pulse_pool.submit(pulse_gpio, pin.gpio)
+        if source != "esp32_actor":
+            send_actor_command(function_id, enabled)
         print(f"[STATE] {source}: {function_id} -> {enabled}")
     return {"id": function_id, "enabled": enabled, "changed": changed, "gpio": pin.gpio}
 
@@ -131,6 +154,8 @@ def set_hazard(enabled: bool, *, source: str = "api") -> dict[str, Any]:
         vehicle_state["hazard"] = enabled
     left = set_function("leftIndicator", enabled, source=source)
     right = set_function("rightIndicator", enabled, source=source)
+    if changed and source != "esp32_actor":
+        send_actor_command("hazard", enabled)
     return {"id": "hazard", "enabled": enabled, "changed": changed, "children": [left, right]}
 
 
@@ -148,7 +173,6 @@ def handle_actor_button(button_number: int) -> None:
     if function_id == "hazard":
         toggle_hazard(source="esp32_actor")
     else:
-        # Ein einzelner Blinker beendet einen eventuell aktiven Warnblinker sauber.
         if function_id in {"leftIndicator", "rightIndicator"}:
             with state_lock:
                 hazard_active = bool(vehicle_state["hazard"])
@@ -186,8 +210,6 @@ def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
         with state_lock:
             vehicle_state["actor_states"] = dict(states)
 
-    # Nur ein echtes Tasterereignis verändert Pi-Ausgänge. Periodische ESP-Statuspakete
-    # dürfen Display-/API-Befehle nicht wieder mit einem alten Zustand überschreiben.
     event_button = payload.get("event_button")
     if isinstance(event_button, int) and 1 <= event_button <= 10:
         handle_actor_button(event_button)
