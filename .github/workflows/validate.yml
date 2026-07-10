@@ -1,0 +1,36 @@
+name: Validate MesseAuto
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check Python syntax
+        run: |
+          python -m py_compile raspberry-pi-1/app.py
+          python -m py_compile raspberry-pi-2/collector.py
+
+      - name: Check shared simulation JavaScript
+        run: node --check simulation/shared/simulation.js
+
+      - name: Check required files
+        run: |
+          test -f raspberry-pi-1/templates/index.html
+          test -f raspberry-pi-2/templates/index.html
+          test -f esp32-actor/esp32_actor.ino
+          test -f esp32-sensor/esp32_sensor.ino
+          test -f simulation/index.html
+          test -f simulation/pi1-screen.html
+          test -f simulation/pi2-screen.html
+          test -f simulation/esp-testbench.html
