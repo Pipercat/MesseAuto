@@ -35,6 +35,19 @@ PINS: tuple[PinDefinition, ...] = (
     PinDefinition("fan", "Lüfter", 22, "climate"),
 )
 
+BUTTON_FUNCTIONS: dict[int, str | None] = {
+    1: "highBeam",
+    2: "lowBeam",
+    3: "underbody",
+    4: "leftIndicator",
+    5: "rightIndicator",
+    6: "hazard",
+    7: "fan",
+    8: None,
+    9: None,
+    10: None,
+}
+
 PULSE_SECONDS = float(os.getenv("MESSEAUTO_PULSE_SECONDS", "0.20"))
 SERIAL_BAUDRATE = int(os.getenv("MESSEAUTO_SERIAL_BAUDRATE", "115200"))
 SERIAL_STALE_SECONDS = float(os.getenv("MESSEAUTO_SERIAL_STALE_SECONDS", "5"))
@@ -62,7 +75,6 @@ vehicle_state: dict[str, Any] = {
         "api_requests": 0,
     },
 }
-
 serial_devices: dict[str, serial.Serial] = {}
 
 
@@ -77,7 +89,6 @@ def setup_gpio() -> None:
 
 
 def pulse_gpio(gpio: int) -> None:
-    """Sendet einen kurzen Impuls. Kein Ausgang bleibt dauerhaft HIGH."""
     if GPIO is None:
         print(f"[GPIO-SIM] Impuls auf BCM {gpio}")
         time.sleep(PULSE_SECONDS)
@@ -89,10 +100,6 @@ def pulse_gpio(gpio: int) -> None:
         GPIO.output(gpio, GPIO.LOW)
 
 
-def queue_pulse(gpio: int) -> None:
-    pulse_pool.submit(pulse_gpio, gpio)
-
-
 def get_pin(function_id: str) -> PinDefinition | None:
     return next((pin for pin in PINS if pin.id == function_id), None)
 
@@ -101,17 +108,14 @@ def set_function(function_id: str, enabled: bool, *, source: str = "api") -> dic
     pin = get_pin(function_id)
     if pin is None:
         raise KeyError(function_id)
-
     with state_lock:
         current = bool(vehicle_state["outputs"][function_id])
         changed = current != enabled
         if changed:
             vehicle_state["outputs"][function_id] = enabled
-
     if changed:
-        queue_pulse(pin.gpio)
+        pulse_pool.submit(pulse_gpio, pin.gpio)
         print(f"[STATE] {source}: {function_id} -> {enabled}")
-
     return {"id": function_id, "enabled": enabled, "changed": changed, "gpio": pin.gpio}
 
 
@@ -130,25 +134,35 @@ def set_hazard(enabled: bool, *, source: str = "api") -> dict[str, Any]:
     return {"id": "hazard", "enabled": enabled, "changed": changed, "children": [left, right]}
 
 
+def toggle_hazard(*, source: str = "api") -> dict[str, Any]:
+    with state_lock:
+        enabled = not bool(vehicle_state["hazard"])
+    return set_hazard(enabled, source=source)
+
+
+def handle_actor_button(button_number: int) -> None:
+    function_id = BUTTON_FUNCTIONS.get(button_number)
+    if function_id is None:
+        print(f"[ESP32] Reserve-Taster {button_number} gedrückt")
+        return
+    if function_id == "hazard":
+        toggle_hazard(source="esp32_actor")
+    else:
+        # Ein einzelner Blinker beendet einen eventuell aktiven Warnblinker sauber.
+        if function_id in {"leftIndicator", "rightIndicator"}:
+            with state_lock:
+                hazard_active = bool(vehicle_state["hazard"])
+            if hazard_active:
+                set_hazard(False, source="esp32_actor")
+        toggle_function(function_id, source="esp32_actor")
+
+
 def candidate_serial_ports() -> list[str]:
     patterns = ("/dev/ttyUSB*", "/dev/ttyACM*", "/dev/serial/by-id/*")
     ports: set[str] = set()
     for pattern in patterns:
         ports.update(glob.glob(pattern))
     return sorted(ports)
-
-
-def apply_actor_states(states: dict[str, Any]) -> None:
-    """Übernimmt ESP-Tasterzustände und erzeugt die nötigen Pi-GPIO-Impulse."""
-    for function_id in ("underbody", "lowBeam", "highBeam", "leftIndicator", "rightIndicator", "fan"):
-        value = states.get(function_id)
-        if isinstance(value, bool):
-            set_function(function_id, value, source="esp32_actor")
-
-    hazard = states.get("hazard")
-    if isinstance(hazard, bool):
-        with state_lock:
-            vehicle_state["hazard"] = hazard
 
 
 def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
@@ -165,11 +179,18 @@ def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
             for key in ("temperature_c", "seat_distance_cm"):
                 if key in payload:
                     vehicle_state["sensors"][key] = payload[key]
-    elif isinstance(payload.get("states"), dict):
-        states = dict(payload["states"])
+        return
+
+    states = payload.get("states")
+    if isinstance(states, dict):
         with state_lock:
-            vehicle_state["actor_states"] = states
-        apply_actor_states(states)
+            vehicle_state["actor_states"] = dict(states)
+
+    # Nur ein echtes Tasterereignis verändert Pi-Ausgänge. Periodische ESP-Statuspakete
+    # dürfen Display-/API-Befehle nicht wieder mit einem alten Zustand überschreiben.
+    event_button = payload.get("event_button")
+    if isinstance(event_button, int) and 1 <= event_button <= 10:
+        handle_actor_button(event_button)
 
 
 def serial_reader(port: str, connection: serial.Serial) -> None:
@@ -272,12 +293,7 @@ def api_esp32():
 @app.post("/api/functions/<function_id>/toggle")
 def api_toggle(function_id: str):
     try:
-        if function_id == "hazard":
-            with state_lock:
-                enabled = not bool(vehicle_state["hazard"])
-            result = set_hazard(enabled)
-        else:
-            result = toggle_function(function_id)
+        result = toggle_hazard() if function_id == "hazard" else toggle_function(function_id)
     except KeyError:
         return jsonify({"error": "Unbekannte Funktion"}), 404
     return jsonify(result)
@@ -306,8 +322,8 @@ def api_all_off():
 
 if __name__ == "__main__":
     setup_gpio()
-    threading.Thread(target=serial_discovery_loop, daemon=True).start()
-    threading.Thread(target=mark_stale_devices, daemon=True).start()
+    threading.Thread(target=serial_discovery_loop, daemon=True, name="serial-discovery").start()
+    threading.Thread(target=mark_stale_devices, daemon=True, name="serial-watchdog").start()
     try:
         app.run(host="0.0.0.0", port=5000, threaded=True)
     finally:
