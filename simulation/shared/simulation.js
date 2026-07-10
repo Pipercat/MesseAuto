@@ -1,5 +1,5 @@
 (() => {
-  const KEY = 'messeauto-simulation-v2';
+  const KEY = 'messeauto-simulation-v3';
   const EVENT = 'messeauto-simulation-update';
 
   const defaults = {
@@ -60,7 +60,7 @@
 
   function addLog(state, source, text) {
     state.logs.unshift({ time: new Date().toLocaleTimeString('de-DE'), source, text });
-    state.logs = state.logs.slice(0, 60);
+    state.logs = state.logs.slice(0, 80);
   }
 
   function seatPosition(distance) {
@@ -80,25 +80,38 @@
     }[id] ?? null;
   }
 
-  function setOutput(id, enabled, source = 'SIM') {
-    const state = load();
-    if (!(id in state.outputs)) return;
+  function applyOutput(state, id, enabled, source) {
+    if (!(id in state.outputs)) return false;
     const changed = state.outputs[id] !== enabled;
     state.outputs[id] = enabled;
-
-    if (id === 'hazard') {
-      state.outputs.leftIndicator = enabled;
-      state.outputs.rightIndicator = enabled;
-    }
-
     if (changed) {
       const gpio = gpioFor(id);
-      if (gpio !== null) {
+      if (gpio !== null && state.connections.pi1) {
         state.pulses[id] = Date.now() + 420;
         addLog(state, 'PI1 GPIO', `BCM ${gpio}: 200-ms-Impuls für ${id}`);
       }
       addLog(state, source, `${id} = ${enabled ? 'AN' : 'AUS'}`);
     }
+    return changed;
+  }
+
+  function setOutput(id, enabled, source = 'SIM') {
+    const state = load();
+    if (!(id in state.outputs)) return;
+
+    if (id === 'hazard') {
+      applyOutput(state, 'hazard', enabled, source);
+      applyOutput(state, 'leftIndicator', enabled, source);
+      applyOutput(state, 'rightIndicator', enabled, source);
+    } else if ((id === 'leftIndicator' || id === 'rightIndicator') && state.outputs.hazard) {
+      applyOutput(state, 'hazard', false, source);
+      applyOutput(state, 'leftIndicator', false, source);
+      applyOutput(state, 'rightIndicator', false, source);
+      applyOutput(state, id, enabled, source);
+    } else {
+      applyOutput(state, id, enabled, source);
+    }
+
     save(state);
   }
 
@@ -116,7 +129,7 @@
 
   function setConnection(name, value) {
     const state = load();
-    state.connections[name] = !!value;
+    state.connections[name] = Boolean(value);
     addLog(state, 'SYSTEM', `${name} ${value ? 'verbunden' : 'getrennt'}`);
     save(state);
   }
@@ -136,16 +149,16 @@
     }
   }
 
-  let lastBlink = false;
   function blinkPhase() {
     return Math.floor(Date.now() / 500) % 2 === 0;
   }
 
+  let lastBlink = blinkPhase();
   function subscribe(callback) {
     const emit = () => callback(load(), blinkPhase());
     window.addEventListener('storage', emit);
     window.addEventListener(EVENT, emit);
-    setInterval(() => {
+    const timer = setInterval(() => {
       const phase = blinkPhase();
       if (phase !== lastBlink) {
         lastBlink = phase;
@@ -153,7 +166,7 @@
       }
     }, 120);
     emit();
-    return emit;
+    return () => clearInterval(timer);
   }
 
   window.MesseAutoSim = {
