@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Arduino / PlatformIO
+.pio/
+.vscode/c_cpp_properties.json
+.vscode/launch.json
