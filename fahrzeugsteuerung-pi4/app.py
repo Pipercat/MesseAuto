@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import logging
 import os
 import threading
 import time
@@ -9,10 +10,13 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
+from actor_button_mapping import handle_button_event
 from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
 from mqtt_client import MqttClient
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -29,6 +33,10 @@ last_test_result: dict[str, Any] | None = None
 last_test_lock = threading.RLock()
 esp32_actor.start()
 mqtt_client.start()
+mqtt_client.subscribe(
+    "messecar/actor/event/button",
+    lambda topic, payload: handle_button_event(payload, controller.toggle_output),
+)
 atexit.register(controller.shutdown)
 atexit.register(esp32_actor.stop)
 atexit.register(mqtt_client.stop)

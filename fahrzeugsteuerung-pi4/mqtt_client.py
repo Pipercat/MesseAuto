@@ -50,11 +50,13 @@ class MqttClient:
         self._last_disconnected_at: float | None = None
         self._last_error: str | None = None
         self._client: "mqtt.Client | None" = None
+        self._subscriptions: dict[str, list] = {}
 
         if self.enabled and mqtt is not None:
             self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
             self._client.on_connect = self._on_connect
             self._client.on_disconnect = self._on_disconnect
+            self._client.on_message = self._on_message
             self._client.reconnect_delay_set(min_delay=1, max_delay=30)
 
     def start(self) -> None:
@@ -88,11 +90,34 @@ class MqttClient:
             self._connected = reason_code == 0
             self._last_connected_at = time.time() if self._connected else self._last_connected_at
             self._last_error = None if self._connected else f"connect reason_code={reason_code}"
+            topics = list(self._subscriptions.keys())
+        # resubscribe after every (re)connect: clean_session=True drops the
+        # broker-side subscription state whenever the connection drops.
+        if self._connected:
+            for topic in topics:
+                client.subscribe(topic, qos=1)
 
     def _on_disconnect(self, client, userdata, reason_code) -> None:  # noqa: ANN001
         with self._lock:
             self._connected = False
             self._last_disconnected_at = time.time()
+
+    def _on_message(self, client, userdata, message) -> None:  # noqa: ANN001
+        with self._lock:
+            handlers = list(self._subscriptions.get(message.topic, []))
+        for handler in handlers:
+            try:
+                handler(message.topic, message.payload)
+            except Exception:
+                # a broken handler must never take down the MQTT network thread
+                pass
+
+    def subscribe(self, topic: str, handler) -> None:  # noqa: ANN001
+        with self._lock:
+            self._subscriptions.setdefault(topic, []).append(handler)
+            already_connected = self._connected
+        if self._client is not None and already_connected:
+            self._client.subscribe(topic, qos=1)
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
