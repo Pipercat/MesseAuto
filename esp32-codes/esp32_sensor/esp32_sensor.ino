@@ -1,8 +1,15 @@
 // MesseAuto ESP32 Sensorik
-// Sendet Temperatur und Sitzabstand als JSON an den Fahrzeug-Pi.
+// Sendet Temperatur und Sitzabstand als JSON per Serial (Werkbank) und per
+// WLAN/MQTT (Messebetrieb) an den Fahrzeug-Pi.
 // Sensorannahme:
 // - Abstand: HC-SR04 kompatibel oder aehnlicher Ultraschallsensor
 // - Temperatur: analoger LM35/TMP36-aehnlicher Sensor an ADC
+
+#include <ArduinoJson.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+
+#include "wifi_credentials.h"
 
 static const uint32_t BAUDRATE = 115200;
 
@@ -15,8 +22,32 @@ static const bool TEMPERATURE_SENSOR_TMP36 = false;
 static const float ADC_REFERENCE_VOLTAGE = 3.3f;
 static const int ADC_MAX_VALUE = 4095;
 
+// Telemetrierate MA-05-002: Standard ca. 1 Hz, hier konfigurierbar.
+static const uint32_t TELEMETRY_INTERVAL_MS = 1000;
+
 uint32_t lastStatusMs = 0;
 uint32_t lastHelloMs = 0;
+
+// --- MesseCar WLAN/MQTT (MA-05-001/002/003) ---
+//
+// Kein Internet auf dem lokalen AP, daher keine NTP-Zeit verfuegbar.
+// `timestamp_ms` in MQTT-Nachrichten ist deshalb `millis()` (Geraete-Uptime),
+// analog zum ESP Actor - siehe MQTT.md.
+static const uint32_t WIFI_RETRY_INTERVAL_MS = 5000;
+static const uint32_t MQTT_RETRY_INTERVAL_MS = 3000;
+static const char *MQTT_CLIENT_ID = "esp_sensor_aux";
+static const char *TOPIC_STATUS = "messecar/sensor/status";
+static const char *TOPIC_TELEMETRY = "messecar/sensor/telemetry";
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+uint32_t lastWifiAttemptAt = 0;
+uint32_t lastMqttAttemptAt = 0;
+
+// Medianfilter (3 Werte) fuer den Abstand, reduziert Ausreisser der
+// Ultraschallmessung (MA-05-002 "Medianfilter der Distanz beibehalten").
+float distanceHistoryMm[3] = {NAN, NAN, NAN};
+uint8_t distanceHistoryIndex = 0;
 
 void setup() {
   Serial.begin(BAUDRATE);
@@ -24,6 +55,10 @@ void setup() {
   pinMode(PIN_DISTANCE_ECHO, INPUT);
   analogReadResolution(12);
   sendHello();
+
+  WiFi.mode(WIFI_STA);
+  mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  mqttClient.setBufferSize(512);
 }
 
 void loop() {
@@ -31,9 +66,11 @@ void loop() {
   if (now - lastHelloMs > 5000) {
     sendHello();
   }
-  if (now - lastStatusMs > 500) {
+  if (now - lastStatusMs > TELEMETRY_INTERVAL_MS) {
     sendSensorStatus();
   }
+  ensureWifiConnected();
+  ensureMqttConnected();
 }
 
 void sendHello() {
@@ -44,27 +81,119 @@ void sendHello() {
 void sendSensorStatus() {
   lastStatusMs = millis();
 
-  float distanceMm = readDistanceMm();
+  float distanceMm = medianFilteredDistanceMm();
   float temperatureC = readTemperatureC();
+  bool distanceValid = isfinite(distanceMm) && distanceMm > 0;
+  bool temperatureValid = isfinite(temperatureC);
 
-  if (!isfinite(distanceMm) || distanceMm <= 0) {
+  if (!distanceValid) {
     Serial.printf(
       "{\"device\":\"esp32_sensor\",\"type\":\"sensor_error\",\"timestamp_ms\":%lu,"
       "\"sensor\":\"seat_distance\",\"message\":\"Kein gueltiger Abstandswert erkannt\"}\n",
       millis()
     );
-    return;
+  } else {
+    const char *position = seatPosition(distanceMm);
+    Serial.printf(
+      "{\"device\":\"esp32_sensor\",\"type\":\"sensor_status\",\"timestamp_ms\":%lu,"
+      "\"temperature_c\":%.1f,\"seat_distance_mm\":%.1f,\"seat_position\":\"%s\",\"errors\":[]}\n",
+      millis(),
+      temperatureC,
+      distanceMm,
+      position
+    );
   }
 
-  const char *position = seatPosition(distanceMm);
-  Serial.printf(
-    "{\"device\":\"esp32_sensor\",\"type\":\"sensor_status\",\"timestamp_ms\":%lu,"
-    "\"temperature_c\":%.1f,\"seat_distance_mm\":%.1f,\"seat_position\":\"%s\",\"errors\":[]}\n",
-    millis(),
-    temperatureC,
-    distanceMm,
-    position
-  );
+  publishTelemetry(temperatureValid ? temperatureC : NAN, distanceValid ? distanceMm : NAN);
+}
+
+// MA-05-003: nur tatsaechlich gueltige Messwerte senden. Ungueltige Felder
+// werden im JSON weggelassen statt einen erfundenen Wert zu senden; Pi 1
+// behandelt ein fehlendes Feld bereits als "missing"-Fehlerzustand.
+void publishTelemetry(float temperatureC, float distanceMm) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  JsonDocument doc;
+  doc["device"] = "esp_sensor_aux";
+  doc["timestamp_ms"] = millis();
+  if (isfinite(temperatureC)) {
+    doc["temperature_c"] = temperatureC;
+  }
+  if (isfinite(distanceMm) && distanceMm > 0) {
+    doc["seat_distance_cm"] = distanceMm / 10.0f;
+  }
+  char buffer[192];
+  serializeJson(doc, buffer, sizeof(buffer));
+  mqttClient.publish(TOPIC_TELEMETRY, buffer, false);
+}
+
+void publishStatus(const char *status, bool retain) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  JsonDocument doc;
+  doc["device"] = "esp_sensor_aux";
+  doc["timestamp_ms"] = millis();
+  doc["status"] = status;
+  char buffer[128];
+  serializeJson(doc, buffer, sizeof(buffer));
+  mqttClient.publish(TOPIC_STATUS, buffer, retain);
+}
+
+void ensureWifiConnected() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+  const uint32_t now = millis();
+  if (now != 0 && now - lastWifiAttemptAt < WIFI_RETRY_INTERVAL_MS) {
+    return;
+  }
+  lastWifiAttemptAt = now;
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void ensureMqttConnected() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  if (mqttClient.connected()) {
+    mqttClient.loop();
+    return;
+  }
+  const uint32_t now = millis();
+  if (now != 0 && now - lastMqttAttemptAt < MQTT_RETRY_INTERVAL_MS) {
+    return;
+  }
+  lastMqttAttemptAt = now;
+
+  JsonDocument willDoc;
+  willDoc["device"] = "esp_sensor_aux";
+  willDoc["status"] = "offline";
+  char willBuffer[128];
+  serializeJson(willDoc, willBuffer, sizeof(willBuffer));
+
+  const bool connected = mqttClient.connect(MQTT_CLIENT_ID, TOPIC_STATUS, 1, true, willBuffer);
+  if (connected) {
+    publishStatus("online", true);
+  }
+}
+
+float medianFilteredDistanceMm() {
+  distanceHistoryMm[distanceHistoryIndex] = readDistanceMm();
+  distanceHistoryIndex = (distanceHistoryIndex + 1) % 3;
+
+  float sorted[3] = {distanceHistoryMm[0], distanceHistoryMm[1], distanceHistoryMm[2]};
+  for (uint8_t i = 0; i < 3; i++) {
+    if (!isfinite(sorted[i])) {
+      return NAN; // ein ungueltiger Wert im Fenster -> kein stabiler Median
+    }
+  }
+  // Fuer drei Werte reicht ein einfacher Sortierschritt; der Median reduziert Ausreisser.
+  if (sorted[0] > sorted[1]) { float t = sorted[0]; sorted[0] = sorted[1]; sorted[1] = t; }
+  if (sorted[1] > sorted[2]) { float t = sorted[1]; sorted[1] = sorted[2]; sorted[2] = t; }
+  if (sorted[0] > sorted[1]) { float t = sorted[0]; sorted[0] = sorted[1]; sorted[1] = t; }
+  return sorted[1];
 }
 
 float readDistanceMm() {
