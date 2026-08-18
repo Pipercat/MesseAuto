@@ -266,6 +266,20 @@ h2 {
   min-height: 190px;
 }
 
+.live-panel {
+  margin-bottom: 18px;
+}
+
+#live-signals-chart {
+  display: block;
+  width: 100%;
+  height: 260px;
+}
+
+.live-counter-table {
+  margin-top: 10px;
+}
+
 .table-panel table {
   flex: 1 1 auto;
 }

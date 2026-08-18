@@ -5,7 +5,7 @@ from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
-from database import init_db, latest_dashboard_data, mark_database_online, store_event
+from database import init_db, latest_dashboard_data, live_signal_traces, mark_database_online, store_event
 
 
 app = Flask(__name__)
@@ -34,6 +34,12 @@ def api_events():
     payload = data.get("payload") if isinstance(data.get("payload"), dict) else data
     event_id = store_event(event_type, payload)
     return jsonify({"ok": True, "event_id": event_id})
+
+
+@app.get("/api/live-signals")
+def api_live_signals():
+    window = int(request.args.get("window_seconds", 60))
+    return jsonify({"ok": True, "data": live_signal_traces(window)})
 
 
 @app.get("/health")

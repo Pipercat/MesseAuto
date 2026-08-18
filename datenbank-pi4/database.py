@@ -764,6 +764,94 @@ def device_message(device: dict[str, Any] | None, fallback: str) -> str:
     return device.get("message") or str(device.get("status"))
 
 
+LIVE_SIGNALS = (
+    "underbody",
+    "lowBeam",
+    "highBeam",
+    "indicatorLeft",
+    "indicatorRight",
+    "hazard",
+    "fan",
+)
+
+
+def live_signal_traces(window_seconds: int = 60) -> dict[str, Any]:
+    """Event-based digital live traces for Screen 2 (MA-07-001/001A/001B/001D).
+
+    Reconstructs on/off transitions per signal from the existing
+    vehicle_output(s) event log instead of a periodic average - a signal
+    change appears at its real event timestamp, not smoothed.
+    """
+
+    now = datetime.now(timezone.utc)
+    cutoff = now.timestamp() - window_seconds
+
+    with connect() as connection:
+        rows = fetch_all(
+            connection,
+            """
+            SELECT timestamp, event_type, payload FROM raw_events
+            WHERE event_type IN ('vehicle_output', 'vehicle_outputs')
+            ORDER BY timestamp ASC
+            """,
+        )
+
+    transitions: dict[str, list[dict[str, Any]]] = {signal: [] for signal in LIVE_SIGNALS}
+    current_state: dict[str, bool] = {signal: False for signal in LIVE_SIGNALS}
+    since_ms: dict[str, float] = {signal: now.timestamp() * 1000 for signal in LIVE_SIGNALS}
+    on_time_ms: dict[str, float] = {signal: 0.0 for signal in LIVE_SIGNALS}
+    activation_count: dict[str, int] = {signal: 0 for signal in LIVE_SIGNALS}
+
+    for row in rows:
+        payload = parse_payload(row["payload"])
+        try:
+            ts = datetime.fromisoformat(row["timestamp"]).timestamp()
+        except ValueError:
+            continue
+
+        changes: dict[str, bool] = {}
+        if row["event_type"] == "vehicle_output" and "output_id" in payload:
+            changes[str(payload["output_id"])] = bool(payload.get("active"))
+        elif row["event_type"] == "vehicle_outputs" and isinstance(payload.get("outputs"), dict):
+            for output_id, active in payload["outputs"].items():
+                changes[str(output_id)] = bool(active)
+
+        for signal, active in changes.items():
+            if signal not in current_state:
+                continue
+            if current_state[signal] == active:
+                continue
+            if current_state[signal] and since_ms[signal] is not None:
+                on_time_ms[signal] += max(0.0, ts * 1000 - since_ms[signal])
+            if active:
+                activation_count[signal] += 1
+            current_state[signal] = active
+            since_ms[signal] = ts * 1000
+            if ts >= cutoff:
+                transitions[signal].append({"timestamp_ms": int(ts * 1000), "active": active})
+
+    now_ms = now.timestamp() * 1000
+    for signal in LIVE_SIGNALS:
+        if current_state[signal]:
+            on_time_ms[signal] += max(0.0, now_ms - since_ms[signal])
+
+    return {
+        "window_seconds": window_seconds,
+        "now_ms": int(now_ms),
+        "signals": {
+            signal: {
+                "active": current_state[signal],
+                "since_ms": int(since_ms[signal]),
+                "duration_ms": int(now_ms - since_ms[signal]),
+                "on_time_ms_total": int(on_time_ms[signal]),
+                "activation_count_total": activation_count[signal],
+                "transitions": transitions[signal],
+            }
+            for signal in LIVE_SIGNALS
+        },
+    }
+
+
 def fetch_all(connection: sqlite3.Connection, query: str) -> list[dict[str, Any]]:
     return [dict(row) for row in connection.execute(query).fetchall()]
 

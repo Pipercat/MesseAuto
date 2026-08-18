@@ -359,6 +359,126 @@
     drawVehicle("vehicle-chart", dashboard.motorHistory, dashboard.outputHistory);
   }
 
+  const liveSignalLabels = {
+    underbody: "Unterboden",
+    lowBeam: "Abblendlicht",
+    highBeam: "Fernlicht",
+    indicatorLeft: "Blinker links",
+    indicatorRight: "Blinker rechts",
+    hazard: "Warnblinker",
+    fan: "Lüfter",
+  };
+  const liveSignalOrder = Object.keys(liveSignalLabels);
+
+  function formatDurationMs(ms) {
+    const totalSeconds = Math.floor(ms / 1000);
+    if (totalSeconds < 60) {
+      return `${totalSeconds}s`;
+    }
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    if (minutes < 60) {
+      return `${minutes}m ${seconds}s`;
+    }
+    return `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  }
+
+  function drawLiveSignals(data) {
+    const surface = canvasContext("live-signals-chart");
+    if (!surface) {
+      return;
+    }
+    const { ctx, width, height } = surface;
+    const rowHeight = height / liveSignalOrder.length;
+    const nowMs = data.now_ms;
+    const windowMs = data.window_seconds * 1000;
+    const labelWidth = 150;
+
+    liveSignalOrder.forEach((signal, index) => {
+      const rowTop = index * rowHeight;
+      const rowMid = rowTop + rowHeight / 2;
+      const info = data.signals[signal] || { active: false, transitions: [] };
+
+      ctx.fillStyle = palette.text;
+      ctx.font = labelFont;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(liveSignalLabels[signal] || signal, 4, rowMid);
+
+      // Zustandsverlauf als Stufenlinie rekonstruieren: letzter bekannter
+      // Zustand vor dem Fenster, dann jede echte Flanke im Fenster.
+      const points = [];
+      let running = info.transitions.length > 0 ? !info.transitions[0].active : info.active;
+      points.push({ t: nowMs - windowMs, active: running });
+      for (const transition of info.transitions) {
+        points.push({ t: transition.timestamp_ms, active: transition.active });
+        running = transition.active;
+      }
+      points.push({ t: nowMs, active: running });
+
+      ctx.strokeStyle = palette.green;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const highY = rowTop + rowHeight * 0.25;
+      const lowY = rowTop + rowHeight * 0.75;
+      const xFor = (t) => labelWidth + ((t - (nowMs - windowMs)) / windowMs) * (width - labelWidth - 4);
+      let prevX = xFor(points[0].t);
+      let prevY = points[0].active ? highY : lowY;
+      ctx.moveTo(prevX, prevY);
+      for (let i = 1; i < points.length; i += 1) {
+        const x = xFor(points[i - 1].t);
+        const y = points[i].active ? highY : lowY;
+        ctx.lineTo(x, prevY);
+        ctx.lineTo(x, y);
+        prevY = y;
+      }
+      ctx.lineTo(xFor(nowMs), prevY);
+      ctx.stroke();
+    });
+  }
+
+  function updateLiveCounters(data) {
+    const tbody = document.querySelector("#live-counter-table tbody");
+    if (!tbody) {
+      return;
+    }
+    tbody.innerHTML = "";
+    liveSignalOrder.forEach((signal) => {
+      const info = data.signals[signal];
+      if (!info) {
+        return;
+      }
+      const row = document.createElement("tr");
+      row.innerHTML = `
+        <td>${liveSignalLabels[signal]}</td>
+        <td>${info.active ? "AN" : "AUS"}</td>
+        <td>${formatDurationMs(info.duration_ms)}</td>
+        <td>${formatDurationMs(info.on_time_ms_total)}</td>
+        <td>${info.activation_count_total}</td>
+      `;
+      tbody.appendChild(row);
+    });
+    const updatedLabel = document.getElementById("live-updated");
+    if (updatedLabel) {
+      updatedLabel.textContent = new Date(data.now_ms).toLocaleTimeString("de-DE");
+    }
+  }
+
+  async function pollLiveSignals() {
+    try {
+      const response = await fetch("/api/live-signals?window_seconds=60");
+      const payload = await response.json();
+      if (payload.ok) {
+        drawLiveSignals(payload.data);
+        updateLiveCounters(payload.data);
+      }
+    } catch (error) {
+      // naechster Poll versucht es erneut
+    }
+  }
+
   window.addEventListener("resize", renderCharts);
   renderCharts();
+  pollLiveSignals();
+  window.setInterval(pollLiveSignals, 1000);
 })();

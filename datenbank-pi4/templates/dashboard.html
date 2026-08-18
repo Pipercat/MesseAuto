@@ -54,6 +54,18 @@
           </article>
         </section>
 
+        <section class="panel live-panel" aria-label="Live Zustaende">
+          <div class="panel-head">
+            <h2>LIVE ZUSTÄNDE</h2>
+            <span id="live-updated">-</span>
+          </div>
+          <canvas id="live-signals-chart" width="1040" height="260"></canvas>
+          <table class="live-counter-table" id="live-counter-table">
+            <thead><tr><th>Signal</th><th>Status</th><th>seit</th><th>AN gesamt</th><th>Aktivierungen</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </section>
+
         <section class="analytics-grid" aria-label="Grafiken">
           <article class="panel chart-panel">
             <div class="panel-head">
