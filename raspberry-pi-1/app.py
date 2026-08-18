@@ -48,7 +48,16 @@ BUTTON_FUNCTIONS: dict[int, str | None] = {
     10: None,
 }
 
+
+def env_flag(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
 PULSE_SECONDS = float(os.getenv("MESSEAUTO_PULSE_SECONDS", "0.20"))
+SERIAL_ENABLED = env_flag("MESSEAUTO_SERIAL_ENABLED", False)
 SERIAL_BAUDRATE = int(os.getenv("MESSEAUTO_SERIAL_BAUDRATE", "115200"))
 SERIAL_STALE_SECONDS = float(os.getenv("MESSEAUTO_SERIAL_STALE_SECONDS", "5"))
 PORT_SCAN_SECONDS = float(os.getenv("MESSEAUTO_PORT_SCAN_SECONDS", "3"))
@@ -64,12 +73,13 @@ vehicle_state: dict[str, Any] = {
     "sensors": {"temperature_c": None, "seat_distance_cm": None},
     "actor_states": {},
     "esp32": {
-        "esp32_actor": {"connected": False, "port": None, "last_seen": None},
-        "esp32_sensor": {"connected": False, "port": None, "last_seen": None},
+        "esp32_actor": {"connected": False, "transport": "none", "port": None, "last_seen": None},
+        "esp32_sensor": {"connected": False, "transport": "none", "port": None, "last_seen": None},
     },
     "system": {
         "started_at": time.time(),
         "pulse_seconds": PULSE_SECONDS,
+        "serial_enabled": SERIAL_ENABLED,
         "serial_baudrate": SERIAL_BAUDRATE,
         "gpio_available": GPIO is not None,
         "api_requests": 0,
@@ -105,7 +115,16 @@ def get_pin(function_id: str) -> PinDefinition | None:
 
 
 def send_actor_command(function_id: str, enabled: bool) -> bool:
-    """Synchronisiert Display-/API-Befehle mit dem Aktor-ESP."""
+    """Legacy-Serial-Fallback für Display-/API-Befehle.
+
+    Die direkte ESP32<->Pi-USB-Verbindung ist im realen MesseCar-Aufbau
+    aus Sicherheitsgründen standardmäßig deaktiviert. Der Code bleibt als
+    Fallback erhalten und darf nur über MESSEAUTO_SERIAL_ENABLED=true
+    aktiviert werden, wenn der Hardwareaufbau eine sichere Trennung erlaubt.
+    """
+    if not SERIAL_ENABLED:
+        return False
+
     with state_lock:
         port = vehicle_state["esp32"]["esp32_actor"].get("port")
         connected = bool(vehicle_state["esp32"]["esp32_actor"].get("connected"))
@@ -196,7 +215,12 @@ def handle_serial_message(port: str, payload: dict[str, Any]) -> None:
 
     now = time.time()
     with state_lock:
-        vehicle_state["esp32"][device] = {"connected": True, "port": port, "last_seen": now}
+        vehicle_state["esp32"][device] = {
+            "connected": True,
+            "transport": "serial",
+            "port": port,
+            "last_seen": now,
+        }
 
     if device == "esp32_sensor":
         with state_lock:
@@ -344,8 +368,14 @@ def api_all_off():
 
 if __name__ == "__main__":
     setup_gpio()
-    threading.Thread(target=serial_discovery_loop, daemon=True, name="serial-discovery").start()
-    threading.Thread(target=mark_stale_devices, daemon=True, name="serial-watchdog").start()
+
+    if SERIAL_ENABLED:
+        print("[SERIAL] Legacy-USB/Serial-Fallback aktiviert.")
+        threading.Thread(target=serial_discovery_loop, daemon=True, name="serial-discovery").start()
+        threading.Thread(target=mark_stale_devices, daemon=True, name="serial-watchdog").start()
+    else:
+        print("[SERIAL] Deaktiviert. Zieltransport für ESP32 ist WLAN/MQTT; siehe TASKS.md.")
+
     try:
         app.run(host="0.0.0.0", port=5000, threaded=True)
     finally:
