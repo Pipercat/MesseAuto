@@ -2,22 +2,65 @@
 
 Diese Datei ist die **einzige kanonische Aufgabenliste** für das MesseAuto/MesseCar-Projekt. Es sollen keine separaten Task-Dateien mehr angelegt werden.
 
+## Verbindlicher KI-Agenten-Workflow
+
+**Jeder einzelne Datensatz dieser Task-Datenbank beinhaltet automatisch fünf Pflichtteile:**
+
+1. **Umsetzen** – ausschließlich den beschriebenen Scope bearbeiten; Abhängigkeiten und bestehende Architektur respektieren.
+2. **Dokumentieren** – jede technische Änderung unmittelbar in den passenden Repo-Dokumenten, Kommentaren, Konfigurationen oder Schnittstellenbeschreibungen nachführen. Keine veraltete Dokumentation zurücklassen.
+3. **Kontrollieren** – die eigene Änderung gegen Task, Abhängigkeiten, Sicherheitsregeln, bestehenden Code und mögliche Regressionen prüfen. Diff/Änderungsumfang kontrollieren und unbeabsichtigte Änderungen korrigieren.
+4. **Testen** – für jede Aufgabe einen zur Aufgabe passenden Test tatsächlich ausführen. Automatisierte Tests sind zu bevorzugen; bei UI, Hardware oder Integrationsaufgaben zusätzlich einen realen bzw. ausdrücklich geforderten Verhaltens-/Hardwaretest durchführen. Fehlerpfade gehören bei sicherheitsrelevanten Aufgaben zwingend zum Test.
+5. **Nachweis dokumentieren** – erst nach dem Test Ergebnis, Testart und relevante Nachweise im Feld `notes` der Aufgabe eintragen und danach `status=done` setzen.
+
+Diese fünf Schritte gelten **für jede Zeile**, auch wenn sie im Feld `task` oder `acceptance` nicht erneut ausgeschrieben sind.
+
+### Pflichtformat für `notes` nach Bearbeitung
+
+Ein Agent ersetzt `-` bzw. ergänzt vorhandene Notizen mindestens in dieser Struktur:
+
+```text
+implementation: <kurz was geändert wurde>
+documentation: <welche Datei/Abschnitt aktualisiert wurde>
+control: <was im Diff/gegen Architektur/Sicherheit kontrolliert wurde>
+test: <konkreter Test, Befehl, Simulation oder Hardwareablauf>
+result: PASS | FAIL | BLOCKED
+evidence: <relevantes Ergebnis, Log, Messwert, Screenshot-Pfad, Commit oder kurzer Nachweis>
+```
+
+Bei einem Fehlschlag bleibt die Aufgabe `in_progress` oder wird `blocked`; `result=FAIL` darf **niemals** zusammen mit `status=done` stehen.
+
 ## Abarbeitungsregel
 
 Eine KI oder ein Entwickler arbeitet diese Tabelle strikt nach `order` ab:
 
-1. Überspringe Datensätze mit `status=done`.
-2. Wähle den kleinsten offenen `order`-Wert, dessen `depends_on` erfüllt ist.
-3. Setze den Datensatz beim Start auf `in_progress`.
-4. Implementiere ausschließlich den beschriebenen Scope.
-5. Prüfe das angegebene `acceptance`-Kriterium.
-6. Erst nach erfolgreicher Prüfung auf `done` setzen.
-7. Danach mit dem nächsten Datensatz fortfahren.
-8. Bei einem echten Hardware-/Informationsblocker `status=blocked` setzen und den Blocker im Feld `notes` dokumentieren; keine Pinbelegung, Hardwareeigenschaft oder Messung erfinden.
+1. Überspringe Datensätze mit `status=done`, prüfe aber bei alten `done`-Einträgen ohne Nachweis bei nächster Berührung, ob Dokumentation/Testnachweis nachgetragen werden muss.
+2. Wähle den kleinsten offenen `order`-Wert, dessen `depends_on` vollständig erfüllt ist.
+3. Lies vor Beginn die betroffenen Dateien und die Dokumentation; keine Architektur oder Hardwareannahme aus dem Tasktitel allein ableiten.
+4. Setze den Datensatz beim Start auf `in_progress`.
+5. Implementiere ausschließlich den beschriebenen Scope.
+6. Aktualisiere unmittelbar die dazugehörige Dokumentation.
+7. Führe eine Selbstkontrolle durch: Diff prüfen, Schnittstellen/Abhängigkeiten kontrollieren, Sicherheitsregeln abgleichen und offensichtliche Regressionen suchen.
+8. Führe mindestens einen passenden Test tatsächlich aus und dokumentiere ihn. Nur „sollte funktionieren“ oder reine Codeinspektion gilt bei implementierten Funktionen nicht als Test.
+9. Prüfe zusätzlich das angegebene `acceptance`-Kriterium vollständig.
+10. Trage Implementation, Dokumentation, Kontrolle, Test, Ergebnis und Nachweis strukturiert in `notes` ein.
+11. Erst wenn **Umsetzung + Dokumentation + Kontrolle + Test + Acceptance vollständig PASS** sind, darf `status=done` gesetzt werden.
+12. Danach mit dem nächsten Datensatz fortfahren.
+13. Bei einem echten Hardware-/Informationsblocker `status=blocked` setzen und den Blocker in `notes` dokumentieren; keine Pinbelegung, Hardwareeigenschaft, Messung oder Testergebnis erfinden.
+14. Wenn ein Test eine Regression entdeckt, diese innerhalb des Scopes beheben und den vollständigen Test erneut durchführen, bevor die Aufgabe abgeschlossen wird.
 
 Erlaubte Statuswerte: `todo`, `in_progress`, `blocked`, `done`.
 
 Prioritäten: `P0` sicherheits-/fahrkritisch, `P1` Kernfunktion, `P2` Diagnose/Komfort, `P3` optional.
+
+### Testregeln nach Aufgabentyp
+
+- **P0 / Safety:** Positivtest **und** mindestens ein relevanter Fehler-/Ausfalltest sind Pflicht. Bei Motor, Hupe, Reboot, Shutdown oder elektrischer Sicherheit muss der sichere Zustand nachweisbar erreicht werden.
+- **Software/API/MQTT:** Syntax/Build/Lint soweit vorhanden + gezielter Funktions-/Integrations-Test. Ungültige Eingaben und Reconnect/Timeout testen, wenn sie zum Scope gehören.
+- **UI:** Funktionaler UI-Test inklusive Touch/Pointer-Verhalten und Fehlerzuständen; keine reine HTML-/CSS-Sichtprüfung als alleiniger Test.
+- **Hardware:** Realer Hardwaretest ist für `done` erforderlich, wenn das Acceptance-Kriterium reale Hardware verlangt. Ist die Hardware nicht verfügbar, Task `blocked`, nicht `done`.
+- **Dokumentation/Planung:** Konsistenzprüfung gegen Repo, bestehende Architektur und abhängige Tasks; Links/Bezeichnungen/Pin- und Topic-Angaben validieren. Eine reine Textänderung ohne Konsistenzkontrolle reicht nicht.
+- **Simulation:** Reproduzierbares Testszenario mit erwartetem und tatsächlichem Ergebnis dokumentieren.
+- **Dauertest/Latenz:** Gemessene Dauer bzw. Messwerte in `notes` festhalten; keine geschätzten Werte als PASS verwenden.
 
 ## Zielarchitektur
 
@@ -49,6 +92,8 @@ USB/Serial ESP32 <-> Pi 1
 ```
 
 ## Task-Datenbank
+
+> **Für jede folgende Zeile gilt zusätzlich zwingend der oben definierte fünfteilige Abschlussnachweis aus Umsetzung, Dokumentation, Kontrolle, Test und Evidence. Das jeweilige `acceptance` ist ein zusätzliches fachliches Kriterium und ersetzt diese Pflichten nicht.**
 
 | order | id | phase | status | priority | depends_on | system | task | acceptance | notes |
 |---:|---|---|---|---|---|---|---|---|---|
@@ -172,6 +217,9 @@ USB/Serial ESP32 <-> Pi 1
 
 Die aktuelle MesseCar-Ausbaustufe ist erst abgeschlossen, wenn alle nicht explizit als optional markierten Datensätze `status=done` haben und insbesondere:
 
+- **Jede abgeschlossene Aufgabe besitzt in `notes` einen nachvollziehbaren Nachweis für Implementation, Dokumentation, Kontrolle, Test und PASS-Ergebnis.**
+- Kein Hardwaretask wurde ohne realen Hardwaretest als abgeschlossen markiert, wenn das Acceptance-Kriterium reale Hardware voraussetzt.
+- Kein P0-Task wurde ohne relevanten Fehler-/Ausfalltest abgeschlossen.
 - ESP↔Pi im realen Fahrzeug ohne dauerhafte USB-Datenverbindung funktioniert.
 - WLAN/MQTT lokal und ohne Cloud stabil läuft.
 - Fahrmotor bei Kommunikationsverlust lokal sicher auf 0 fällt.
