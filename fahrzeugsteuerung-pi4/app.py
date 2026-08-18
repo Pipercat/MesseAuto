@@ -168,11 +168,13 @@ def send_heartbeat() -> None:
             "active_outputs": active_outputs,
             "active_output_count": len(active_outputs),
             "motor_percent": (state.get("motor") or {}).get("percent"),
-            "esp32_actor": actor_status_payload(actor_snapshot),
+            "esp32_actor": {**actor_status_payload(actor_snapshot), **actor_transport_status(actor_snapshot)},
             "last_test_result": state.get("lastTestResult"),
         },
     )
-    database_client.send_event("actor_status", actor_status_payload(actor_snapshot))
+    database_client.send_event(
+        "actor_status", {**actor_status_payload(actor_snapshot), **actor_transport_status(actor_snapshot)}
+    )
 
 
 def heartbeat_loop() -> None:
@@ -228,9 +230,7 @@ def api_metrics():
     return jsonify({"ok": True, "metrics": controller.metrics()})
 
 
-@app.get("/api/esp32/actor")
-def api_esp32_actor():
-    serial_snapshot = esp32_actor.snapshot()
+def actor_transport_status(serial_snapshot: dict[str, Any]) -> dict[str, Any]:
     with actor_mqtt_state_lock:
         mqtt_state = dict(actor_mqtt_state) if actor_mqtt_state else None
     mqtt_last_seen = mqtt_state["timestamp_ms"] if mqtt_state and "timestamp_ms" in mqtt_state else None
@@ -244,17 +244,20 @@ def api_esp32_actor():
     else:
         transport, connected, last_seen = "offline", False, mqtt["last_seen"]
 
-    return jsonify(
-        {
-            "ok": True,
-            "esp32Actor": serial_snapshot,
-            "transport": transport,
-            "connected": connected,
-            "last_seen": last_seen,
-            "mqtt": {**mqtt, "state": mqtt_state},
-            "error": None if connected else (mqtt["status"] or "no_data"),
-        }
-    )
+    return {
+        "status": "connected" if connected else "offline",
+        "transport": transport,
+        "connected": connected,
+        "last_seen": last_seen,
+        "mqtt": {**mqtt, "state": mqtt_state},
+        "error": None if connected else (mqtt["status"] or "no_data"),
+    }
+
+
+@app.get("/api/esp32/actor")
+def api_esp32_actor():
+    serial_snapshot = esp32_actor.snapshot()
+    return jsonify({"ok": True, "esp32Actor": serial_snapshot, **actor_transport_status(serial_snapshot)})
 
 
 @app.get("/api/esp32/sensor")

@@ -268,7 +268,7 @@ h2 {
   display: block;
   width: 100%;
   height: calc(100% - 52px);
-  min-height: 190px;
+  min-height: 0;
 }
 
 .live-panel {
