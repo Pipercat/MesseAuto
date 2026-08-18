@@ -26,3 +26,4 @@ wifi_credentials.h
 # Redundant local archives
 *.zip
 backups/
+build/
