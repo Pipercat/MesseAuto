@@ -21,6 +21,7 @@ Thumbs.db
 .pio/
 .vscode/c_cpp_properties.json
 .vscode/launch.json
+wifi_credentials.h
 
 # Redundant local archives
 *.zip

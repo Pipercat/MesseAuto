@@ -10,6 +10,11 @@
 
 #include <Arduino.h>
 #include <Adafruit_NeoPixel.h>
+#include <ArduinoJson.h>
+#include <PubSubClient.h>
+#include <WiFi.h>
+
+#include "wifi_credentials.h"
 
 constexpr uint32_t SERIAL_BAUDRATE = 115200;
 constexpr uint16_t DEBOUNCE_MS = 40;
@@ -76,6 +81,26 @@ Adafruit_NeoPixel underbodyPixels(
   UNDERBODY_PIXEL_PIN,
   NEO_GRB + NEO_KHZ800
 );
+
+// --- MesseCar WLAN/MQTT (MA-04-001/002/003/004) ---
+//
+// Der lokale MesseCar-AP hat keinen Internetzugang, also keine NTP-Zeit
+// verfuegbar. `timestamp_ms` in ESP-Nachrichten ist deshalb bewusst
+// `millis()` (Geraete-Uptime) statt echter Unix-Zeit wie bei Pi 1 - siehe
+// MQTT.md. Fuer Reihenfolge/Aktualitaet innerhalb einer ESP-Session reicht
+// das aus; ein Vergleich mit Pi-1-Zeitstempeln ist nicht sinnvoll.
+constexpr uint32_t WIFI_RETRY_INTERVAL_MS = 5000;
+constexpr uint32_t MQTT_RETRY_INTERVAL_MS = 3000;
+constexpr const char *MQTT_CLIENT_ID = "esp_actor";
+constexpr const char *TOPIC_STATUS = "messecar/actor/status";
+constexpr const char *TOPIC_EVENT_BUTTON = "messecar/actor/event/button";
+constexpr const char *TOPIC_STATE = "messecar/actor/state";
+constexpr const char *TOPIC_COMMAND = "messecar/actor/command";
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+uint32_t lastWifiAttemptAt = 0;
+uint32_t lastMqttAttemptAt = 0;
 
 struct ButtonState {
   bool stablePressed = false;
@@ -211,6 +236,114 @@ void printBoolJson(bool value) {
   Serial.print(value ? "true" : "false");
 }
 
+void publishStatus(const char *status, bool retain) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  JsonDocument doc;
+  doc["device"] = "esp_actor";
+  doc["timestamp_ms"] = millis();
+  doc["status"] = status;
+  char buffer[128];
+  serializeJson(doc, buffer, sizeof(buffer));
+  mqttClient.publish(TOPIC_STATUS, buffer, retain);
+}
+
+void publishActorState() {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  JsonDocument doc;
+  doc["device"] = "esp_actor";
+  doc["timestamp_ms"] = millis();
+  JsonObject outputs = doc["outputs"].to<JsonObject>();
+  outputs["highBeam"] = state.highBeam;
+  outputs["lowBeam"] = state.lowBeam;
+  outputs["underbody"] = state.underbody;
+  outputs["leftIndicator"] = state.leftIndicator;
+  outputs["rightIndicator"] = state.rightIndicator;
+  outputs["hazard"] = state.hazard;
+  outputs["fan"] = state.fan;
+  char buffer[256];
+  serializeJson(doc, buffer, sizeof(buffer));
+  mqttClient.publish(TOPIC_STATE, buffer, false);
+}
+
+void publishButtonEvent(uint8_t index, bool pressed) {
+  if (!mqttClient.connected()) {
+    return;
+  }
+  JsonDocument doc;
+  doc["device"] = "esp_actor";
+  doc["timestamp_ms"] = millis();
+  doc["button"] = index + 1;
+  doc["edge"] = pressed ? "pressed" : "released";
+  char buffer[128];
+  serializeJson(doc, buffer, sizeof(buffer));
+  mqttClient.publish(TOPIC_EVENT_BUTTON, buffer, false);
+}
+
+void setStateByName(const String &name, bool enabled);
+
+void handleMqttMessage(char *topic, byte *payload, unsigned int length) {
+  JsonDocument doc;
+  DeserializationError parseError = deserializeJson(doc, payload, length);
+  if (parseError) {
+    return;
+  }
+  if (!doc["device"].is<const char *>() || !doc["timestamp_ms"].is<long>()) {
+    return;
+  }
+  const char *function = doc["function"] | "";
+  if (function[0] == '\0') {
+    return;
+  }
+  const bool value = doc["value"] | false;
+  setStateByName(String(function), value);
+}
+
+void ensureWifiConnected() {
+  if (WiFi.status() == WL_CONNECTED) {
+    return;
+  }
+  const uint32_t now = millis();
+  if (now != 0 && now - lastWifiAttemptAt < WIFI_RETRY_INTERVAL_MS) {
+    return;
+  }
+  lastWifiAttemptAt = now;
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+}
+
+void ensureMqttConnected() {
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  if (mqttClient.connected()) {
+    mqttClient.loop();
+    return;
+  }
+  const uint32_t now = millis();
+  if (now != 0 && now - lastMqttAttemptAt < MQTT_RETRY_INTERVAL_MS) {
+    return;
+  }
+  lastMqttAttemptAt = now;
+
+  JsonDocument willDoc;
+  willDoc["device"] = "esp_actor";
+  willDoc["status"] = "offline";
+  char willBuffer[128];
+  serializeJson(willDoc, willBuffer, sizeof(willBuffer));
+
+  const bool connected = mqttClient.connect(
+    MQTT_CLIENT_ID, TOPIC_STATUS, 1, true, willBuffer
+  );
+  if (connected) {
+    mqttClient.subscribe(TOPIC_COMMAND, 1);
+    publishStatus("online", true);
+    publishActorState();
+  }
+}
+
 void sendStatus(int8_t eventButton = -1) {
   Serial.print("{\"device\":\"esp32_actor\",\"mode\":\"standalone_buttons\",\"states\":{");
   Serial.print("\"highBeam\":"); printBoolJson(state.highBeam);
@@ -313,6 +446,7 @@ void setStateByName(const String &name, bool enabled) {
 
   updateOutputs();
   sendStatus();
+  publishActorState();
 }
 
 // Nur fuer Werkbankdiagnose am PC. Im Messebetrieb haengt der ESP nicht am Pi.
@@ -402,6 +536,7 @@ void handleButtonPress(uint8_t index) {
   updateUnderbodyPixels();
   sendSwitchLog(index);
   sendStatus(index + 1);
+  publishActorState();
 }
 
 void readButtons() {
@@ -415,6 +550,7 @@ void readButtons() {
     if ((now - buttons[i].changedAt) >= DEBOUNCE_MS && rawPressed != buttons[i].stablePressed) {
       buttons[i].stablePressed = rawPressed;
       sendButtonLog(i, buttons[i].stablePressed);
+      publishButtonEvent(i, buttons[i].stablePressed);
       if (buttons[i].stablePressed) {
         handleButtonPress(i);
       }
@@ -460,6 +596,11 @@ void setup() {
   updateOutputs();
   updateUnderbodyPixels();
   sendStatus();
+
+  WiFi.mode(WIFI_STA);
+  mqttClient.setServer(MQTT_BROKER_HOST, MQTT_BROKER_PORT);
+  mqttClient.setCallback(handleMqttMessage);
+  mqttClient.setBufferSize(512);
 }
 
 void loop() {
@@ -467,11 +608,15 @@ void loop() {
   readButtons();
   updateOutputs();
   updateUnderbodyPixels();
+  ensureWifiConnected();
+  ensureMqttConnected();
 
   const uint32_t now = millis();
   if (now - lastStatusAt >= STATUS_INTERVAL_MS) {
     lastStatusAt = now;
     sendStatus();
+    publishStatus("online", true);
+    publishActorState();
   }
 
   delay(5);
