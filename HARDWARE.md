@@ -94,3 +94,26 @@ Vorteile für den aktuellen Aufbau:
 - vollständig lokal ohne Cloud betreibbar
 
 Die exakte MQTT-Architektur und alle Arbeitsschritte sind in `TASKS.md` definiert.
+
+### MesseCar-WLAN (Pi 1 als Access Point, parallel zu bestehender WLAN-Nutzung)
+
+Pi 1 besitzt einen Broadcom BCM4345/6-WLAN-Chip (`brcmfmac`), der laut `iw list` gleichzeitig **eine STA-Verbindung (managed) und einen AP** betreiben kann — allerdings nur auf **demselben Kanal** (`#channels <= 1` in den `valid interface combinations`).
+
+Aufbau (Stand MA-01-002):
+
+- `wlan0`: bestehende STA-Verbindung (z. B. Hotspot für SSH/Programmierung), NetworkManager-verwaltet.
+- `ap0`: zusätzliche virtuelle Schnittstelle, ausschließlich für den lokalen `MesseCar`-AP, NetworkManager-unmanaged (`/etc/NetworkManager/conf.d/99-messecar-ap-unmanaged.conf`).
+- SSID `MesseCar`, WPA2-PSK, Kanal **identisch mit dem aktuellen `wlan0`-Kanal** (muss bei Kanalwechsel des STA-Netzes ggf. nachgezogen werden).
+- IP-Bereich `10.10.10.0/24`, Pi 1 = `10.10.10.1`, DHCP-Range `10.10.10.50–10.10.10.150` (dnsmasq).
+- Kein IP-Forwarding/NAT (`net.ipv4.ip_forward=0`) — der AP bietet bewusst **keinen Internetzugang**, nur lokale Erreichbarkeit von Pi 1 (Broker folgt in MA-01-003).
+- Zuständige Dienste: `messecar-ap.service` (legt `ap0` an), `messecar-hostapd.service`, `messecar-dnsmasq.service`; Konfiguration unter `/etc/hostapd/hostapd-messecar.conf` und `/etc/dnsmasq.d/messecar-ap.conf`.
+- **Das WPA2-Passwort liegt bewusst nur lokal auf Pi 1 (`hostapd-messecar.conf`, Modus 600) und wird nicht in dieses öffentliche Repo committet.**
+
+Offen: Neustart-Persistenztest von `ap0`/hostapd/dnsmasq nach echtem Pi-1-Reboot sowie realer Verbindungstest beider ESPs (folgt mit M4/M5-Firmware).
+
+### MQTT-Broker (Mosquitto) auf Pi 1
+
+- Paket `mosquitto` + `mosquitto-clients`, Systemdienst `mosquitto.service` (Standard-Debian-Unit, per Drop-in `messecar-order.conf` nach `messecar-ap.service` sortiert).
+- Eigene Config `/etc/mosquitto/conf.d/messecar.conf`: Listener **ausschließlich** auf `10.10.10.1` (AP, für ESPs) und `127.0.0.1` (lokale Pi-1-App) — bewusst **nicht** auf `wlan0`/`eth0` erreichbar (getestet, Connection refused).
+- `allow_anonymous true` im aktuell isolierten Lokalnetz; Zugangsschutz kann bei Bedarf später ergänzt werden.
+- Port 1883, kein TLS (rein lokales Netz ohne Internetanbindung).
