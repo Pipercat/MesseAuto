@@ -12,6 +12,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
+from mqtt_client import MqttClient
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -21,13 +22,16 @@ app = Flask(__name__, static_folder=None)
 controller = create_controller()
 esp32_actor = ESP32ActorBridge()
 database_client = DatabaseClient()
+mqtt_client = MqttClient()
 heartbeat_interval = float(os.getenv("MESSEAUTO_HEARTBEAT_INTERVAL", "5"))
 heartbeat_stop = threading.Event()
 last_test_result: dict[str, Any] | None = None
 last_test_lock = threading.RLock()
 esp32_actor.start()
+mqtt_client.start()
 atexit.register(controller.shutdown)
 atexit.register(esp32_actor.stop)
+atexit.register(mqtt_client.stop)
 atexit.register(heartbeat_stop.set)
 
 
