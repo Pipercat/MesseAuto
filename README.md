@@ -1,29 +1,40 @@
 # MesseAuto
 
-Verteilte Steuerungs-, Anzeige-, Sensor- und Simulationssoftware für das MesseAuto-Projekt.
+Verteilte Steuerungs-, Anzeige-, Sensor- und Simulationssoftware für das MesseAuto/MesseCar-Projekt.
 
-## Systemaufbau
+## Aktueller Sicherheits- und Architekturstand
+
+> **ESP32 und Raspberry Pi 1 werden im realen Fahrzeug aktuell NICHT per USB miteinander verbunden.**
+>
+> Eine direkte USB-Verbindung stellt eine gemeinsame Masse zwischen ESP32 und Raspberry Pi her. Im vorhandenen Fahrzeugaufbau entsteht dadurch ein unerwünschter Ground-Pfad/Kurzschluss. Deshalb ist die USB/Serial-Kommunikation standardmäßig deaktiviert und bleibt nur als späterer Fallback im Code erhalten.
+
+Der Zielaufbau verwendet **WLAN + MQTT** als primären Kommunikationsweg zwischen den ESP32 und Raspberry Pi 1. Die Funkstrecke soll vollständig lokal funktionieren und keine Cloud benötigen.
 
 ```text
 Physische Taster
       │
       ▼
-ESP32 Aktorik ── USB/JSON ──► Raspberry Pi 1 ── HTTP/JSON ──► Raspberry Pi 2
-      │                              │                              │
-      ├─ Lüfter / NeoPixel           ├─ GPIO-Impulse               ├─ Diagnose-Screen
-      └─ Tasterereignisse             ├─ Fahrzeug-Screen            └─ SQLite-Telemetrie
-                                      │
-ESP32 Sensorik ── USB/JSON ───────────┘
+ESP32 Actor ───────── WLAN / MQTT ────────► Raspberry Pi 1 ── HTTP/JSON ──► Raspberry Pi 2
+      │                                           │                              │
+      ├─ Lüfter / NeoPixel                        ├─ GPIO-Impulse                 ├─ Diagnose-Screen
+      └─ Tasterereignisse                         ├─ Fahrzeug-Screen              └─ SQLite-Telemetrie
+                                                  │
+ESP32 Sensor ──────── WLAN / MQTT ────────────────┘
       │
       ├─ Temperatur
       └─ Sitzabstand
+
+USB/Serial ESP32 <-> Pi 1
+      └─ deaktivierter Legacy-Fallback
 ```
+
+Die vollständige, bereits definierte Umsetzung befindet sich in [`TASKS.md`](TASKS.md).
 
 ## Ordner
 
 | Ordner | Gerät / Aufgabe |
 |---|---|
-| `raspberry-pi-1/` | Hauptsteuerung, GPIO-Impulse, ESP-Erkennung, API und Fahrzeug-Display |
+| `raspberry-pi-1/` | Hauptsteuerung, GPIO-Impulse, API und Fahrzeug-Display |
 | `raspberry-pi-2/` | Diagnose, Tests, Telemetrie, SQLite und zweites Display |
 | `esp32-actor/` | 10 Taster, Lüfter, NeoPixel und Tasterereignisse |
 | `esp32-sensor/` | Temperatur- und Abstandssensorik |
@@ -35,13 +46,12 @@ Pi 1 ist die zentrale Steuerung.
 
 Funktionen:
 
-- erkennt beide ESP32 automatisch über USB
-- liest JSON-Zeilen mit 115200 Baud
-- verarbeitet physische Tasterereignisse des ESP32
 - erzeugt kurze GPIO-Impulse statt dauerhaftem HIGH
 - stellt eine HTTP-API bereit
-- zeigt die originale Fahrzeugsteuerung im Browser an
-- verhindert, dass periodische alte ESP-Zustände Displaybefehle überschreiben
+- zeigt die Fahrzeugsteuerung im Browser an
+- verwaltet den logischen Fahrzeugzustand
+- soll zukünftig ESP32 Actor und Sensor primär per WLAN/MQTT anbinden
+- enthält weiterhin die alte USB/Serial-Implementierung als deaktivierten Fallback
 
 ## GPIO-Belegung Pi 1
 
@@ -62,13 +72,13 @@ chmod +x start.sh
 ./start.sh
 ```
 
-Display im Browser:
+Display:
 
 ```text
 http://<IP-VON-PI1>:5000/
 ```
 
-Wichtige API-Endpunkte:
+API:
 
 ```text
 GET  /api/health
@@ -80,6 +90,48 @@ POST /api/functions/<id>/toggle
 PUT  /api/functions/<id>
 POST /api/all-off
 ```
+
+## USB/Serial-Fallback
+
+Serial ist standardmäßig deaktiviert:
+
+```text
+MESSEAUTO_SERIAL_ENABLED=false
+```
+
+Nur in einem hardwareseitig sicheren Aufbau darf der Legacy-Fallback bewusst aktiviert werden:
+
+```bash
+export MESSEAUTO_SERIAL_ENABLED=true
+```
+
+Die Aktivierung stellt **keine** galvanische Trennung her. Vorher muss hardwareseitig sichergestellt sein, dass die gemeinsame USB-Masse keinen problematischen Strompfad erzeugt.
+
+# Zielkommunikation WLAN / MQTT
+
+Geplant und verbindlich definiert:
+
+- Pi 1 stellt bevorzugt ein eigenes lokales MesseCar-WLAN bereit.
+- ESP32 Actor und Sensor verbinden sich automatisch damit.
+- lokaler Mosquitto-Broker auf/bei Pi 1
+- keine Cloud
+- MQTT mit klaren Topics, Online/Offline-Status und Reconnect-Logik
+- physische Taster funktionieren auch bei WLAN-Ausfall lokal weiter
+- Reconnect darf keine alten Befehle erneut schalten
+
+Vorgesehene Topics:
+
+```text
+messecar/actor/status
+messecar/actor/event/button
+messecar/actor/state
+messecar/actor/command
+messecar/sensor/status
+messecar/sensor/telemetry
+messecar/pi1/status
+```
+
+Details und Abnahmekriterien: [`TASKS.md`](TASKS.md).
 
 # Raspberry Pi 2
 
@@ -94,7 +146,7 @@ chmod +x start.sh
 ./start.sh
 ```
 
-Display im Browser:
+Display:
 
 ```text
 http://<IP-VON-PI2>:5001/
@@ -116,7 +168,7 @@ POST /api/tests/all_off
 
 Die SQLite-Datei `telemetry.db` wird automatisch erzeugt und ist absichtlich in `.gitignore` ausgeschlossen.
 
-# ESP32 Aktorik
+# ESP32 Actor
 
 Datei:
 
@@ -152,17 +204,11 @@ Direkte ESP-Ausgänge:
 | Lüfter | 22 |
 | WS2812 / NeoPixel | 0 |
 
-Der Sketch ist für 75 NeoPixel konfiguriert.
+Der Sketch ist aktuell für 75 NeoPixel konfiguriert.
 
-Wichtig: Der ESP sendet bei einem echten Tastendruck zusätzlich `event_button`. Pi 1 reagiert nur auf dieses Ereignis. Regelmäßige Statuspakete dienen nur zur Anzeige und überschreiben keine Pi-Befehle mehr.
+Die bestehende Serial-Logik bleibt im Sketch zunächst erhalten, soll aber nicht als normale Fahrzeugverbindung verwendet werden. Die Zielimplementierung überträgt echte Tastendrücke als MQTT-Events und empfängt Zustandsbefehle von Pi 1 über MQTT.
 
-Beispiel:
-
-```json
-{"device":"esp32_actor","states":{"highBeam":true},"event_button":1}
-```
-
-# ESP32 Sensorik
+# ESP32 Sensor
 
 Datei:
 
@@ -185,12 +231,6 @@ Aktuelle Standardpins:
 
 Die Abstandsmessung verwendet mehrere Messungen und einen Medianfilter gegen Ausreißer.
 
-Beispiel:
-
-```json
-{"device":"esp32_sensor","temperature_c":23.40,"seat_distance_cm":41.8,"uptime_ms":123456}
-```
-
 **Achtung:** Ein 5-V-Echo-Signal eines Ultraschallsensors darf nicht direkt an einen 3,3-V-ESP32-GPIO angeschlossen werden. Pegelwandler oder Spannungsteiler verwenden.
 
 # PC-Simulation
@@ -201,7 +241,7 @@ Startdatei:
 simulation/index.html
 ```
 
-Die Simulation enthält drei getrennte Ansichten:
+Ansichten:
 
 ```text
 pi1-screen.html     → Raspberry-Pi-1-Fahrzeugdisplay
@@ -209,7 +249,7 @@ pi2-screen.html     → Raspberry-Pi-2-Diagnosedisplay
 esp-testbench.html  → Taster, Sensoren und Aktoren der ESPs
 ```
 
-Alle drei Fenster teilen denselben simulierten Zustand über den Browser-Speicher.
+Alle drei Fenster teilen denselben simulierten Zustand über den Browser-Speicher. Die Simulation soll im Zuge des MQTT-Umbaus zusätzlich Offline-/Reconnect- und Kommunikationsfehler abbilden.
 
 # Umgebungsvariablen
 
@@ -217,6 +257,7 @@ Alle drei Fenster teilen denselben simulierten Zustand über den Browser-Speiche
 
 ```text
 MESSEAUTO_PULSE_SECONDS=0.20
+MESSEAUTO_SERIAL_ENABLED=false
 MESSEAUTO_SERIAL_BAUDRATE=115200
 MESSEAUTO_SERIAL_STALE_SECONDS=5
 MESSEAUTO_PORT_SCAN_SECONDS=3
@@ -233,4 +274,25 @@ MESSEAUTO_REQUEST_TIMEOUT=2.0
 
 # Aktueller Stand
 
-Die Codes für alle vier Geräte, beide echten Pi-Displays und die PC-Simulation sind vorhanden. Die noch hardwareabhängigen Punkte sind die endgültige Sensor-Pinbelegung und der konkrete ESP32-Boardtyp beim Kompilieren.
+Vorhanden sind die Codes für Pi 1, Pi 2, ESP32 Actor, ESP32 Sensor, beide Pi-Displays und die PC-Simulation.
+
+**Aktuell umgesetzt:**
+
+- Pi-1-GPIO-/API-/Display-Logik
+- Pi-2-Diagnose und SQLite-Telemetrie
+- ESP-Actor- und Sensor-Grundlogik
+- PC-Simulation
+- Legacy-USB/Serial-Code
+- USB/Serial auf Pi 1 standardmäßig deaktiviert
+
+**Als nächstes umzusetzen:**
+
+- lokales MesseCar-WLAN
+- MQTT-Broker
+- MQTT-Client auf Pi 1
+- WLAN/MQTT auf beiden ESP32
+- definierter Event-/State-/Command-Fluss
+- Offline-/Reconnect-Handling
+- Diagnose- und Simulationserweiterung
+
+Die Reihenfolge und Definition of Done stehen in [`TASKS.md`](TASKS.md).
