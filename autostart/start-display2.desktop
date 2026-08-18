@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MesseAuto starten
+Comment=Startet Datenbank-Pi 4 und Display 2
+Exec=/home/messedata/.config/messeauto/start-display2.sh
+Icon=applications-system
+Terminal=false
+Categories=Utility;
+StartupNotify=false

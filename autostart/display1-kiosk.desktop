@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=MesseAuto Display 1 Kiosk
+Comment=Startet die Fahrzeugsteuerung im Kioskmodus
+Exec=/home/messepi/.config/messeauto/display1-kiosk-autostart.sh
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

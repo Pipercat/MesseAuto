@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=MesseAuto starten
+Comment=Startet Prüfungs-Pi 4 und Display 1
+Exec=/home/messepi/.config/messeauto/start-display1.sh
+Icon=applications-system
+Terminal=false
+Categories=Utility;
+StartupNotify=false

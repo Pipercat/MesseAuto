@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bertrandt Fahrzeugsteuerung</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="system-pill">
+          <span class="status-dot"></span>
+          <span id="system-mode">Simulation</span>
+        </div>
+        <div class="brand-lockup" aria-label="Bertrandt">
+          <img class="brand-logo" src="assets/Bertrandt_logo.svg" alt="Bertrandt" />
+        </div>
+      </header>
+
+      <main class="screens">
+        <section id="home-screen" class="screen home-screen is-active" aria-labelledby="home-title">
+          <div class="home-copy">
+            <p class="eyebrow">Raspberry Pi Touchscreen</p>
+            <h1 id="home-title">Fahrzeugsteuerung</h1>
+            <p class="lead">
+              Manuelle Bedienung und automatische Funktionsprüfung für Licht, Blinker,
+              Motor und Zusatzmodule.
+            </p>
+          </div>
+
+          <img
+            class="home-mark"
+            src="assets/bertrandt_b_yellow_rgb-306x400.png"
+            alt=""
+            aria-hidden="true"
+          />
+
+          <div class="choice-grid" aria-label="Hauptbereiche">
+            <button class="choice-card" type="button" data-route="vehicle">
+              <span class="choice-kicker">01</span>
+              <span class="choice-title">Fahrzeugansicht</span>
+              <span class="choice-copy">Licht, Motor und Funktionen steuern</span>
+            </button>
+            <button class="choice-card" type="button" data-route="tests">
+              <span class="choice-kicker">02</span>
+              <span class="choice-title">Testautomatisierung</span>
+              <span class="choice-copy">Automatische Funktionstests starten</span>
+            </button>
+            <button class="choice-card" type="button" data-route="pi">
+              <span class="choice-kicker">03</span>
+              <span class="choice-title">Pi & Relais</span>
+              <span class="choice-copy">GPIO-Modus, Relaisimpulse und Pinbelegung prüfen</span>
+            </button>
+          </div>
+        </section>
+
+        <section id="pi-screen" class="screen pi-screen" aria-labelledby="pi-title">
+          <div class="screen-title">
+            <p class="eyebrow">Raspberry Pi 4</p>
+            <h1 id="pi-title">Pi & Relais</h1>
+          </div>
+
+          <div class="pi-layout">
+            <section class="pi-status-panel" aria-label="Pi Status">
+              <div class="section-heading">
+                <h2>Systemstatus</h2>
+                <span id="pi-mode">warte</span>
+              </div>
+              <div class="pi-status-grid">
+                <div>
+                  <span>GPIO</span>
+                  <strong id="pi-gpio-mode">--</strong>
+                </div>
+                <div>
+                  <span>Relaismodus</span>
+                  <strong id="pi-relay-mode">--</strong>
+                </div>
+                <div>
+                  <span>Impulsdauer</span>
+                  <strong id="pi-pulse-duration">--</strong>
+                </div>
+                <div>
+                  <span>Motor-PWM</span>
+                  <strong id="pi-motor-pin">GPIO 22</strong>
+                </div>
+              </div>
+              <div class="pi-action-row" aria-label="Pi Aktionen">
+                <button class="pi-action-button" type="button" data-pi-action="refresh">Aktualisieren</button>
+                <button class="pi-action-button pi-action-danger" type="button" data-pi-action="reset">Alles zurücksetzen</button>
+              </div>
+              <p id="pi-action-status" class="pi-action-status">Bereit</p>
+            </section>
+
+            <section class="pi-map-panel" aria-label="Relais und Pins">
+              <div class="section-heading">
+                <h2>Relais / Ausgänge</h2>
+                <span id="pi-output-summary">0 aktiv</span>
+              </div>
+              <div id="pi-output-map" class="pi-output-map"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="vehicle-screen" class="screen vehicle-screen" aria-labelledby="vehicle-title">
+          <div class="screen-title">
+            <p class="eyebrow">Manuelle Steuerung</p>
+            <h1 id="vehicle-title">Fahrzeugansicht</h1>
+          </div>
+
+          <div class="vehicle-layout">
+            <section class="brand-visual" aria-label="Fahrzeugbereich">
+              <img
+                class="big-b"
+                src="assets/bertrandt_b_yellow_rgb-306x400.png"
+                alt=""
+                aria-hidden="true"
+              />
+              <div class="telemetry-strip">
+                <div>
+                  <span class="telemetry-label">Aktive Ausgänge</span>
+                  <strong id="active-count">0</strong>
+                </div>
+                <div>
+                  <span class="telemetry-label">Motor</span>
+                  <strong id="motor-readout">0 %</strong>
+                </div>
+                <div>
+                  <span class="telemetry-label">Theorie</span>
+                  <strong id="voltage-readout">0,0 V</strong>
+                </div>
+              </div>
+            </section>
+
+            <section class="control-bank" aria-label="Fahrzeugfunktionen">
+              <div class="control-section">
+                <div class="section-heading">
+                  <h2>Beleuchtung</h2>
+                  <span>GPIO 17 / 27 / 25</span>
+                </div>
+                <div id="lighting-controls" class="control-grid"></div>
+              </div>
+
+              <div class="control-section">
+                <div class="section-heading">
+                  <h2>Blinker</h2>
+                  <span>GPIO 26 / 5 / 6</span>
+                </div>
+                <div id="indicator-controls" class="control-grid"></div>
+              </div>
+
+              <div class="control-section">
+                <div class="section-heading">
+                  <h2>Erweiterungen</h2>
+                  <span>GPIO 16 / 23 / 24</span>
+                </div>
+                <div id="extension-controls" class="control-grid"></div>
+              </div>
+            </section>
+
+            <section class="motor-panel" aria-label="Motorsteuerung">
+              <div class="section-heading">
+                <h2>Motor-PWM</h2>
+                <span>GPIO 22</span>
+              </div>
+              <div class="motor-output">
+                <strong id="motor-percent">0 %</strong>
+                <span id="motor-voltage">0,0 V</span>
+              </div>
+              <input id="motor-slider" class="motor-slider" type="range" min="0" max="100" value="0" />
+              <div class="slider-scale" aria-hidden="true">
+                <span>0 %</span>
+                <span>50 %</span>
+                <span>100 %</span>
+              </div>
+              <p class="technical-note">
+                PWM-Ausgabe mit theoretischer 0 bis 5 V Anzeige.
+              </p>
+            </section>
+          </div>
+        </section>
+
+        <section id="tests-screen" class="screen tests-screen" aria-labelledby="tests-title">
+          <div class="screen-title">
+            <p class="eyebrow">Automatische Prüfung</p>
+            <h1 id="tests-title">Testautomatisierung</h1>
+          </div>
+
+          <div class="test-layout">
+            <section class="test-actions" aria-label="Testauswahl">
+              <button class="test-button" type="button" data-test="lights">Lichttest</button>
+              <button class="test-button" type="button" data-test="indicators">Blinkertest</button>
+              <button class="test-button" type="button" data-test="motor">Motortest</button>
+              <button class="test-button" type="button" data-test="fan">Lüftertest</button>
+              <button class="test-button test-button-strong" type="button" data-test="full">Gesamttest</button>
+            </section>
+
+            <section class="test-status" aria-live="polite">
+              <div class="status-head">
+                <span class="status-label">Status</span>
+                <strong id="test-state">Bereit</strong>
+              </div>
+              <div id="test-result" class="result-banner">Noch kein Test ausgeführt</div>
+              <ol id="test-log" class="test-log"></ol>
+            </section>
+
+            <section class="graph-panel" aria-label="Live-Grafen">
+              <div class="section-heading">
+                <h2>Live-Grafen</h2>
+                <span>Strom / Spannung / PWM</span>
+              </div>
+              <canvas id="live-chart" width="880" height="330"></canvas>
+              <div class="graph-legend" aria-hidden="true">
+                <span class="legend-current">Strom</span>
+                <span class="legend-voltage">Spannung</span>
+                <span class="legend-pwm">PWM</span>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <button id="back-button" class="back-button" type="button" hidden>Zurück</button>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>

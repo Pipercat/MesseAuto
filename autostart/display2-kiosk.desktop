@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=MesseAuto Display 2 Kiosk
+Comment=Startet das Daten-Dashboard im Kioskmodus
+Exec=/home/messedata/.config/messeauto/display2-kiosk-autostart.sh
+Terminal=false
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

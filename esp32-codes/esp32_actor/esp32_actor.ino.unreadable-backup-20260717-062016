@@ -1,0 +1,571 @@
+// MesseAuto ESP32 Aktorsteuerung
+//
+// Der ESP32 wird einmal per PC/Mac geflasht und danach standalone im Fahrzeug
+// eingesteckt. Im Messebetrieb gibt es KEINE dauerhafte Serial-Verbindung zum
+// Raspberry Pi. Die Serial-Kommandos unten sind nur fuer Werkbankdiagnose am PC.
+// Die Ausgaenge bleiben nicht dauerhaft aktiv: jeder Diagnosebefehl erzeugt nur
+// einen kurzen Impuls und gibt den Pin danach wieder frei.
+
+static const uint32_t BAUDRATE = 115200;
+static const bool DEFAULT_RELAY_ACTIVE_HIGH = false;
+static const uint16_t DEFAULT_RELAY_PULSE_MS = 250;
+static const bool BUTTON_INPUTS_ENABLED = false;
+
+// Ausgangspins am ESP32. Diese Pins am echten Modell pruefen/anpassen.
+static const int PIN_UNDERBODY = 16;
+static const int PIN_LOW_BEAM = 17;
+static const int PIN_HIGH_BEAM = 18;
+static const int PIN_INDICATOR_LEFT = 19;
+static const int PIN_INDICATOR_RIGHT = 21;
+static const int PIN_HAZARD = 22;
+static const int PIN_FAN = 23;
+static const int PIN_FREE_ONE = 25;
+static const int PIN_FREE_TWO = 26;
+static const int PIN_MOTOR_PWM = 27;
+
+// Optionale Diagnose-Eingaenge fuer spaeter bestaetigte Buttonpins.
+static const int BUTTON_LOW_BEAM = 32;
+static const int BUTTON_HIGH_BEAM = 33;
+static const int BUTTON_UNDERBODY = 34;
+static const int BUTTON_FAN = 35;
+
+struct RelayOutput {
+  const char *id;
+  int pin;
+  bool logicalState;
+  uint32_t pulseUntilMs;
+  uint32_t pulseCount;
+};
+
+RelayOutput relayOutputs[] = {
+  {"underbody", PIN_UNDERBODY, false, 0, 0},
+  {"lowBeam", PIN_LOW_BEAM, false, 0, 0},
+  {"highBeam", PIN_HIGH_BEAM, false, 0, 0},
+  {"indicatorLeft", PIN_INDICATOR_LEFT, false, 0, 0},
+  {"indicatorRight", PIN_INDICATOR_RIGHT, false, 0, 0},
+  {"hazard", PIN_HAZARD, false, 0, 0},
+  {"fan", PIN_FAN, false, 0, 0},
+  {"freeOne", PIN_FREE_ONE, false, 0, 0},
+  {"freeTwo", PIN_FREE_TWO, false, 0, 0},
+};
+
+static const size_t RELAY_COUNT = sizeof(relayOutputs) / sizeof(relayOutputs[0]);
+
+uint32_t lastStatusMs = 0;
+uint32_t lastHelloMs = 0;
+uint32_t totalPulseCount = 0;
+int motorPercent = 0;
+bool relayPulseActiveHigh = DEFAULT_RELAY_ACTIVE_HIGH;
+uint16_t relayPulseMs = DEFAULT_RELAY_PULSE_MS;
+String lastPulseId = "-";
+String inputLine;
+
+void setup() {
+  Serial.begin(BAUDRATE);
+
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    releaseRelayPin(relayOutputs[index].pin);
+  }
+
+  pinMode(PIN_MOTOR_PWM, OUTPUT);
+
+  if (BUTTON_INPUTS_ENABLED) {
+    pinMode(BUTTON_LOW_BEAM, INPUT_PULLUP);
+    pinMode(BUTTON_HIGH_BEAM, INPUT_PULLUP);
+    pinMode(BUTTON_UNDERBODY, INPUT_PULLUP);
+    pinMode(BUTTON_FAN, INPUT_PULLUP);
+  }
+
+  ledcAttach(PIN_MOTOR_PWM, 1000, 8);
+  setMotorPercent(0);
+  sendHello();
+}
+
+void loop() {
+  readSerialCommands();
+  serviceRelayPulses();
+
+  if (BUTTON_INPUTS_ENABLED) {
+    readButtonDiagnostics();
+  }
+
+  uint32_t now = millis();
+  if (now - lastHelloMs > 5000) {
+    sendHello();
+  }
+  if (now - lastStatusMs > 500) {
+    sendStatus();
+  }
+}
+
+void readButtonDiagnostics() {
+  // Nur Diagnose: Die manuelle Relais-/Tasterverdrahtung schaltet elektrisch
+  // selbst. Der ESP soll daraus keinen Dauerausgang ableiten.
+}
+
+void readSerialCommands() {
+  while (Serial.available() > 0) {
+    char c = static_cast<char>(Serial.read());
+    if (c == '\n') {
+      inputLine.trim();
+      handleCommand(inputLine);
+      inputLine = "";
+    } else if (c != '\r') {
+      inputLine += c;
+    }
+  }
+}
+
+void handleCommand(const String &line) {
+  if (line.length() == 0) {
+    return;
+  }
+
+  if (line.equalsIgnoreCase("PING")) {
+    sendStatus();
+    return;
+  }
+
+  if (line.equalsIgnoreCase("RESET")) {
+    resetKnownLogicalOutputs();
+    sendStatus();
+    return;
+  }
+
+  if (handleModeLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (handlePulseDurationLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (handleDiagnosticPinPulseLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (handlePulseLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (handleMotorLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (handleLegacyMotorLine(line)) {
+    sendStatus();
+    return;
+  }
+
+  if (line.charAt(0) == '{') {
+    handleJsonLikeCommand(line);
+    sendStatus();
+    return;
+  }
+
+  Serial.printf(
+    "{\"device\":\"esp32_actor\",\"type\":\"warning\",\"message\":\"unknown_command\",\"line\":\"%s\"}\n",
+    safeLine(line).c_str()
+  );
+}
+
+bool handleModeLine(const String &line) {
+  String command = line;
+  command.trim();
+  command.toUpperCase();
+
+  if (!command.startsWith("MODE ") && !command.startsWith("POLARITY ")) {
+    return false;
+  }
+
+  if (command.indexOf("HIGH") >= 0) {
+    relayPulseActiveHigh = true;
+    releaseAllRelayPins();
+    return true;
+  }
+  if (command.indexOf("LOW") >= 0) {
+    relayPulseActiveHigh = false;
+    releaseAllRelayPins();
+    return true;
+  }
+
+  return true;
+}
+
+bool handlePulseDurationLine(const String &line) {
+  String command = line;
+  command.trim();
+  command.replace(':', ' ');
+
+  if (!startsWithIgnoreCase(command, "PULSE_MS ")) {
+    return false;
+  }
+
+  int firstSpace = command.indexOf(' ');
+  relayPulseMs = constrain(command.substring(firstSpace + 1).toInt(), 40, 1200);
+  return true;
+}
+
+bool handleDiagnosticPinPulseLine(const String &line) {
+  String command = line;
+  command.trim();
+  command.replace(':', ' ');
+
+  if (!startsWithIgnoreCase(command, "PULSE_PIN ") && !startsWithIgnoreCase(command, "PIN ")) {
+    return false;
+  }
+
+  int firstSpace = command.indexOf(' ');
+  int secondSpace = command.indexOf(' ', firstSpace + 1);
+  int thirdSpace = secondSpace >= 0 ? command.indexOf(' ', secondSpace + 1) : -1;
+  int gpio = command.substring(firstSpace + 1, secondSpace >= 0 ? secondSpace : command.length()).toInt();
+
+  bool pulseHigh = relayPulseActiveHigh;
+  if (secondSpace >= 0) {
+    String levelText = command.substring(secondSpace + 1, thirdSpace >= 0 ? thirdSpace : command.length());
+    levelText.trim();
+    levelText.toLowerCase();
+    if (levelText == "high" || levelText == "1" || levelText == "on") {
+      pulseHigh = true;
+    } else if (levelText == "low" || levelText == "0" || levelText == "off") {
+      pulseHigh = false;
+    }
+  }
+
+  uint16_t durationMs = relayPulseMs;
+  if (thirdSpace >= 0) {
+    durationMs = constrain(command.substring(thirdSpace + 1).toInt(), 40, 1200);
+  }
+
+  pulseDiagnosticPin(gpio, pulseHigh, durationMs);
+  return true;
+}
+
+bool handlePulseLine(const String &line) {
+  String command = line;
+  command.trim();
+  command.replace(':', ' ');
+
+  if (!startsWithIgnoreCase(command, "PULSE ") && !startsWithIgnoreCase(command, "SET ")) {
+    return false;
+  }
+
+  int firstSpace = command.indexOf(' ');
+  int secondSpace = command.indexOf(' ', firstSpace + 1);
+  String outputId = secondSpace > 0
+    ? command.substring(firstSpace + 1, secondSpace)
+    : command.substring(firstSpace + 1);
+  String stateText = secondSpace > 0 ? command.substring(secondSpace + 1) : "";
+  outputId.trim();
+  stateText.trim();
+
+  int relayIndex = findRelay(outputId);
+  if (relayIndex < 0) {
+    return true;
+  }
+
+  bool requestedState = relayOutputs[relayIndex].logicalState;
+  if (stateText.length() > 0) {
+    requestedState = parseStateText(stateText, requestedState);
+  } else {
+    requestedState = !requestedState;
+  }
+
+  applyRelayCommand(relayIndex, requestedState, true);
+  return true;
+}
+
+bool handleMotorLine(const String &line) {
+  String command = line;
+  command.trim();
+  command.replace(':', ' ');
+
+  if (!startsWithIgnoreCase(command, "MOTOR ")) {
+    return false;
+  }
+
+  int firstSpace = command.indexOf(' ');
+  String percentText = command.substring(firstSpace + 1);
+  percentText.trim();
+  setMotorPercent(percentText.toInt());
+  return true;
+}
+
+bool handleLegacyMotorLine(const String &line) {
+  int firstColon = line.indexOf(':');
+  int secondColon = firstColon >= 0 ? line.indexOf(':', firstColon + 1) : -1;
+  if (firstColon < 0 || secondColon < 0) {
+    return false;
+  }
+
+  int legacyPwm = line.substring(0, firstColon).toInt();
+  int brake = line.substring(secondColon + 1).toInt();
+  if (brake == 1) {
+    resetKnownLogicalOutputs();
+    return true;
+  }
+
+  int percent = static_cast<int>(round(constrain(legacyPwm, 0, 80) / 0.8));
+  setMotorPercent(percent);
+  return true;
+}
+
+void handleJsonLikeCommand(const String &line) {
+  if (line.indexOf("\"reset\"") >= 0) {
+    resetKnownLogicalOutputs();
+  }
+
+  int pwmValue = readIntField(line, "motor_percent", -1);
+  if (pwmValue < 0) {
+    pwmValue = readIntField(line, "motorPercent", -1);
+  }
+  if (pwmValue < 0) {
+    pwmValue = readIntField(line, "pwm", -1);
+  }
+  if (pwmValue >= 0) {
+    setMotorPercent(pwmValue);
+  }
+
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    int requested = readBoolField(line, relayOutputs[index].id);
+    if (requested >= 0) {
+      applyRelayCommand(index, requested == 1, true);
+    }
+  }
+}
+
+void applyRelayCommand(size_t index, bool requestedState, bool alwaysPulse) {
+  bool changed = relayOutputs[index].logicalState != requestedState;
+  relayOutputs[index].logicalState = requestedState;
+  if (changed || alwaysPulse) {
+    startRelayPulse(index);
+  }
+}
+
+void startRelayPulse(size_t index) {
+  relayOutputs[index].pulseUntilMs = millis() + relayPulseMs;
+  relayOutputs[index].pulseCount += 1;
+  totalPulseCount += 1;
+  lastPulseId = relayOutputs[index].id;
+  activateRelayPin(relayOutputs[index].pin);
+}
+
+void serviceRelayPulses() {
+  uint32_t now = millis();
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    if (relayOutputs[index].pulseUntilMs != 0 && timeReached(now, relayOutputs[index].pulseUntilMs)) {
+      relayOutputs[index].pulseUntilMs = 0;
+      releaseRelayPin(relayOutputs[index].pin);
+    }
+  }
+}
+
+void resetKnownLogicalOutputs() {
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    if (relayOutputs[index].logicalState) {
+      startRelayPulse(index);
+    }
+    relayOutputs[index].logicalState = false;
+  }
+  setMotorPercent(0);
+}
+
+void setMotorPercent(int percent) {
+  motorPercent = constrain(percent, 0, 100);
+  ledcWrite(PIN_MOTOR_PWM, map(motorPercent, 0, 100, 0, 255));
+}
+
+void activateRelayPin(int pin) {
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, relayPulseActiveHigh ? HIGH : LOW);
+}
+
+void releaseRelayPin(int pin) {
+  digitalWrite(pin, LOW);
+  pinMode(pin, INPUT);
+}
+
+void releaseAllRelayPins() {
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    relayOutputs[index].pulseUntilMs = 0;
+    releaseRelayPin(relayOutputs[index].pin);
+  }
+}
+
+void pulseDiagnosticPin(int pin, bool pulseHigh, uint16_t durationMs) {
+  if (!isSafeOutputPin(pin)) {
+    Serial.printf(
+      "{\"device\":\"esp32_actor\",\"type\":\"warning\",\"message\":\"unsafe_pin\",\"pin\":%d}\n",
+      pin
+    );
+    return;
+  }
+
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, pulseHigh ? HIGH : LOW);
+  delay(durationMs);
+  digitalWrite(pin, LOW);
+  pinMode(pin, INPUT);
+  totalPulseCount += 1;
+  lastPulseId = String("GPIO") + pin;
+}
+
+bool isSafeOutputPin(int pin) {
+  if (pin >= 6 && pin <= 11) {
+    return false;
+  }
+  if (pin == 1 || pin == 3 || pin == 34 || pin == 35 || pin == 36 || pin == 39) {
+    return false;
+  }
+  return pin >= 2 && pin <= 33;
+}
+
+int findRelay(const String &outputId) {
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    if (outputId.equals(relayOutputs[index].id)) {
+      return static_cast<int>(index);
+    }
+  }
+  return -1;
+}
+
+bool parseStateText(const String &text, bool fallback) {
+  String normalized = text;
+  normalized.trim();
+  normalized.toLowerCase();
+  if (normalized == "1" || normalized == "true" || normalized == "on" || normalized == "ein") {
+    return true;
+  }
+  if (normalized == "0" || normalized == "false" || normalized == "off" || normalized == "aus") {
+    return false;
+  }
+  return fallback;
+}
+
+int readBoolField(const String &line, const char *key) {
+  String quotedKey = String("\"") + key + "\"";
+  int keyIndex = line.indexOf(quotedKey);
+  if (keyIndex < 0) {
+    return -1;
+  }
+
+  int trueIndex = line.indexOf("true", keyIndex);
+  int falseIndex = line.indexOf("false", keyIndex);
+  int oneIndex = line.indexOf("1", keyIndex);
+  int zeroIndex = line.indexOf("0", keyIndex);
+
+  int firstTrue = firstPositive(trueIndex, oneIndex);
+  int firstFalse = firstPositive(falseIndex, zeroIndex);
+
+  if (firstTrue >= 0 && (firstFalse < 0 || firstTrue < firstFalse)) {
+    return 1;
+  }
+  if (firstFalse >= 0) {
+    return 0;
+  }
+  return -1;
+}
+
+int firstPositive(int first, int second) {
+  if (first < 0) {
+    return second;
+  }
+  if (second < 0) {
+    return first;
+  }
+  return min(first, second);
+}
+
+int readIntField(const String &line, const char *key, int fallback) {
+  String quotedKey = String("\"") + key + "\"";
+  int keyIndex = line.indexOf(quotedKey);
+  if (keyIndex < 0) {
+    return fallback;
+  }
+  int colon = line.indexOf(':', keyIndex);
+  if (colon < 0) {
+    return fallback;
+  }
+  return line.substring(colon + 1).toInt();
+}
+
+bool startsWithIgnoreCase(const String &text, const char *prefix) {
+  String left = text.substring(0, strlen(prefix));
+  String right = String(prefix);
+  left.toLowerCase();
+  right.toLowerCase();
+  return left == right;
+}
+
+bool timeReached(uint32_t now, uint32_t target) {
+  return static_cast<int32_t>(now - target) >= 0;
+}
+
+String safeLine(const String &line) {
+  String safe = line;
+  safe.replace("\\", "\\\\");
+  safe.replace("\"", "\\\"");
+  if (safe.length() > 80) {
+    safe = safe.substring(0, 80);
+  }
+  return safe;
+}
+
+void sendHello() {
+  lastHelloMs = millis();
+  Serial.printf(
+    "{\"device\":\"esp32_actor\",\"type\":\"hello\",\"protocol\":\"relay_pulse_serial\","
+    "\"relay_mode\":\"pulse_only\",\"idle_mode\":\"released\",\"pulse_level\":\"%s\","
+    "\"baudrate\":%lu,\"pulse_ms\":%u}\n",
+    relayPulseActiveHigh ? "high" : "low",
+    BAUDRATE,
+    relayPulseMs
+  );
+}
+
+void sendStatus() {
+  lastStatusMs = millis();
+  Serial.print(
+    "{\"device\":\"esp32_actor\",\"type\":\"actor_status\",\"protocol\":\"relay_pulse_serial\","
+    "\"relay_mode\":\"pulse_only\",\"idle_mode\":\"released\","
+  );
+  Serial.printf(
+    "\"pulse_level\":\"%s\",\"timestamp_ms\":%lu,\"pulse_ms\":%u,\"pulse_count\":%lu,"
+    "\"last_pulse\":\"%s\",\"motor_percent\":%d,\"outputs\":{",
+    relayPulseActiveHigh ? "high" : "low",
+    millis(),
+    relayPulseMs,
+    totalPulseCount,
+    lastPulseId.c_str(),
+    motorPercent
+  );
+
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    Serial.printf(
+      "%s\"%s\":%s",
+      index == 0 ? "" : ",",
+      relayOutputs[index].id,
+      boolJson(relayOutputs[index].logicalState)
+    );
+  }
+
+  Serial.print("},\"active_pulses\":{");
+  for (size_t index = 0; index < RELAY_COUNT; index += 1) {
+    Serial.printf(
+      "%s\"%s\":%s",
+      index == 0 ? "" : ",",
+      relayOutputs[index].id,
+      boolJson(relayOutputs[index].pulseUntilMs != 0)
+    );
+  }
+  Serial.print("},\"errors\":[]}\n");
+}
+
+const char *boolJson(bool value) {
+  return value ? "true" : "false";
+}

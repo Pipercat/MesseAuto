@@ -1,0 +1,29 @@
+[Unit]
+Description=MesseAuto Fahrzeugsteuerung
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/messepi/Desktop/fahrzeugsteuerung-pi4
+ExecStart=/home/messepi/Desktop/fahrzeugsteuerung-pi4/.venv/bin/python /home/messepi/Desktop/fahrzeugsteuerung-pi4/app.py
+Environment=MESSEAUTO_GPIO_MODE=auto
+Environment=MESSEAUTO_HOST=0.0.0.0
+Environment=MESSEAUTO_PORT=8000
+Environment=MESSEAUTO_ACTIVE_HIGH=1
+Environment=MESSEAUTO_MOTOR_ACTIVE_HIGH=1
+Environment=MESSEAUTO_MOTOR_FREQUENCY=1000
+Environment=MESSEAUTO_DATABASE_PI_URL=http://10.42.0.12:9000
+Environment=MESSEAUTO_DATABASE_TIMEOUT=1.0
+Environment=MESSEAUTO_HEARTBEAT_INTERVAL=5
+Environment=MESSEAUTO_ESP32_ACTOR_ENABLED=0
+Environment=MESSEAUTO_ESP32_ACTOR_BAUDRATE=115200
+Environment=MESSEAUTO_ESP32_ACTOR_TIMEOUT=3
+Environment=MESSEAUTO_PULSE_DURATION=0.12
+Restart=on-failure
+RestartSec=2
+User=messepi
+SupplementaryGroups=gpio
+
+[Install]
+WantedBy=multi-user.target

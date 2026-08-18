@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MesseAuto Datenbank-Pi</title>
+    <link rel="stylesheet" href="/static/style.css" />
+    <meta http-equiv="refresh" content="8" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="app-header">
+        <div class="system-pill">
+          <span class="status-dot"></span>
+          <span>Datenbank aktiv</span>
+        </div>
+        <div class="brand-lockup" aria-label="Bertrandt">
+          <img class="brand-logo" src="/static/assets/Bertrandt_logo.svg" alt="Bertrandt" />
+        </div>
+      </header>
+
+      <main class="shell">
+        <img
+          class="background-mark"
+          src="/static/assets/bertrandt_b_yellow_rgb-306x400.png"
+          alt=""
+          aria-hidden="true"
+        />
+
+        <section class="hero">
+          <div>
+            <p class="eyebrow">Datenbank-Pi 4</p>
+            <h1>Fahrzeugfunktionen Live</h1>
+            <p class="lead">Licht, Blinker, Lüfter, Motor-PWM und Testergebnisse aus den gesammelten Fahrzeugdaten.</p>
+          </div>
+        </section>
+
+        <section class="cards" aria-label="Kennzahlen">
+          <article class="card">
+            <span>Aktive Funktionen</span>
+            <strong>{{ data.analytics.currentVehicle.activeOutputCount }}</strong>
+          </article>
+          <article class="card">
+            <span>Motor-PWM</span>
+            <strong>{{ data.analytics.currentVehicle.motorPercent }}%</strong>
+          </article>
+          <article class="card">
+            <span>Tests bestanden</span>
+            <strong>{{ data.counts.passed_tests }}/{{ data.counts.tests }}</strong>
+          </article>
+          <article class="card">
+            <span>Fahrzeugdaten</span>
+            <strong>{{ data.counts.vehicle_events }}</strong>
+          </article>
+        </section>
+
+        <section class="analytics-grid" aria-label="Grafiken">
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <h2>Funktionen</h2>
+              <span>Nutzung</span>
+            </div>
+            <canvas id="function-usage-chart" width="520" height="230"></canvas>
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <h2>Befehlsverlauf</h2>
+              <span>pro Minute</span>
+            </div>
+            <canvas id="vehicle-timeline-chart" width="520" height="230"></canvas>
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <h2>Motor-PWM</h2>
+              <span>0 bis 100 %</span>
+            </div>
+            <canvas id="motor-chart" width="520" height="230"></canvas>
+          </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <h2>Motor / Ausgänge</h2>
+              <span>PWM / Aktivität</span>
+            </div>
+            <canvas id="vehicle-chart" width="520" height="230"></canvas>
+          </article>
+        </section>
+
+        <section class="tables-grid" aria-label="Tabellen">
+          <article class="panel table-panel">
+            <div class="panel-head">
+              <h2>Funktionen</h2>
+              <span>{{ data.analytics.currentVehicle.activeOutputCount }} aktiv</span>
+            </div>
+            <table class="functions-table">
+              <thead><tr><th>Funktion</th><th>Zustand</th><th>Impulse</th></tr></thead>
+              <tbody>
+                {% for fn in data.analytics.functionStatus %}
+                  <tr>
+                    <td>{{ fn.label }}</td>
+                    <td><span class="status-label {{ 'is-connected' if fn.active else 'is-unknown' }}">{{ "AN" if fn.active else "AUS" }}</span></td>
+                    <td>{{ fn.usage }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-head">
+              <h2>Fahrzeugaktionen</h2>
+              <span>Live</span>
+            </div>
+            <table class="events-table">
+              <thead><tr><th>Zeit</th><th>Typ</th><th>Funktion</th><th>Wert</th></tr></thead>
+              <tbody>
+                {% for event in data.analytics.latestVehicleEvents %}
+                  <tr>
+                    <td>{{ event.time }}</td>
+                    <td>{{ event.type }}</td>
+                    <td>{{ event.function }}</td>
+                    <td>{{ event.value }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="4">Noch keine Fahrzeugaktion gespeichert</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </article>
+
+          <article class="panel table-panel">
+            <div class="panel-head">
+              <h2>Testergebnisse</h2>
+              <span>Historie</span>
+            </div>
+            <table class="tests-table">
+              <thead><tr><th>Zeit</th><th>Test</th><th>Ergebnis</th><th>Meldung</th></tr></thead>
+              <tbody>
+                {% for test in data.latest_tests %}
+                  <tr>
+                    <td>{{ test.display_time }}</td>
+                    <td>{{ test.display_name }}</td>
+                    <td>{{ test.display_result }}</td>
+                    <td>{{ test.display_message }}</td>
+                  </tr>
+                {% else %}
+                  <tr><td colspan="4">Noch kein Testlauf gespeichert</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script id="dashboard-data" type="application/json">{{ data.analytics | tojson }}</script>
+    <script src="/static/dashboard.js"></script>
+  </body>
+</html>

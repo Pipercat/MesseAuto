@@ -1,0 +1,17 @@
+[Unit]
+Description=MesseAuto Datenbank-Pi
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/messedata/datenbank-pi4
+ExecStart=/home/messedata/datenbank-pi4/.venv/bin/python /home/messedata/datenbank-pi4/server.py
+Environment=MESSEAUTO_DB_HOST=0.0.0.0
+Environment=MESSEAUTO_DB_PORT=9000
+Restart=on-failure
+RestartSec=2
+User=messedata
+
+[Install]
+WantedBy=multi-user.target

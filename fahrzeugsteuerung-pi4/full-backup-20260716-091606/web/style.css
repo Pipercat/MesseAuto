@@ -1,0 +1,1345 @@
+:root {
+  --bg: #f2f5fa;
+  --bg-raised: #ffffff;
+
+  --panel: rgba(255, 255, 255, 0.98);
+  --panel-strong: #ffffff;
+
+  --line: rgba(15, 23, 42, 0.24);
+  --line-strong: rgba(255, 212, 0, 0.95);
+
+  --text: #0f172a;
+  --muted: #475569;
+  --muted-strong: #1e293b;
+
+  --yellow: #ffd400;
+  --yellow-dark: #b88600;
+
+  --green: #009f5d;
+  --cyan: #006fc9;
+  --red: #d62828;
+
+  --shadow: 0 10px 26px rgba(15, 23, 42, 0.14);
+
+  --radius: 12px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  width: 100%;
+  height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+
+  color: var(--text);
+
+  font-family:
+    "Segoe UI",
+    "Inter",
+    "Helvetica Neue",
+    Arial,
+    sans-serif;
+
+  background:
+    linear-gradient(
+      135deg,
+      rgba(255, 212, 0, 0.12) 0 18%,
+      transparent 18% 100%
+    ),
+    linear-gradient(
+      90deg,
+      rgba(15, 23, 42, 0.03) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      0deg,
+      rgba(15, 23, 42, 0.03) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #f4f7fb 48%,
+      #e8eef6 100%
+    );
+
+  background-size:
+    auto,
+    52px 52px,
+    52px 52px,
+    auto;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button {
+  min-height: 62px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: var(--panel);
+  cursor: pointer;
+  touch-action: manipulation;
+  font-weight: 850;
+
+  box-shadow:
+    0 7px 16px rgba(15, 23, 42, 0.1);
+
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+
+button:focus,
+input:focus {
+  outline: 4px solid rgba(255, 212, 0, 0.44);
+  outline-offset: 3px;
+}
+
+button:hover {
+  transform: translateY(-1px);
+  border-color: var(--yellow-dark);
+  background: #fff9dc;
+
+  box-shadow:
+    0 10px 24px rgba(15, 23, 42, 0.16);
+}
+
+/* ---------- Grundlayout 1920 x 1080 ---------- */
+
+.app-shell {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  padding: 72px 42px 26px;
+}
+
+.app-header {
+  position: fixed;
+  z-index: 20;
+  top: 14px;
+  left: 42px;
+  right: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  pointer-events: none;
+}
+
+/* ---------- Kopfbereich ---------- */
+
+.system-pill,
+.brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+
+  min-height: 46px;
+
+  border: 2px solid var(--line);
+  border-radius: var(--radius);
+
+  background: rgba(255, 255, 255, 0.98);
+
+  box-shadow:
+    0 7px 18px rgba(15, 23, 42, 0.12);
+
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.system-pill {
+  padding: 0 16px;
+
+  color: var(--muted-strong);
+
+  font-size: 1rem;
+  font-weight: 850;
+}
+
+.status-dot {
+  width: 12px;
+  height: 12px;
+
+  border-radius: 50%;
+
+  background: var(--green);
+
+  box-shadow:
+    0 0 16px rgba(0, 159, 93, 0.7);
+}
+
+.system-pill.is-simulation .status-dot {
+  background: var(--yellow);
+
+  box-shadow:
+    0 0 18px rgba(255, 212, 0, 0.82);
+}
+
+.system-pill.is-offline .status-dot {
+  background: var(--red);
+
+  box-shadow:
+    0 0 18px rgba(214, 40, 40, 0.7);
+}
+
+.brand-lockup {
+  padding: 7px 14px;
+
+  border-color: rgba(184, 134, 0, 0.48);
+  background: rgba(255, 255, 255, 0.98);
+}
+
+.brand-logo {
+  display: block;
+
+  width: clamp(190px, 15vw, 270px);
+  height: auto;
+}
+
+/* ---------- Screens ---------- */
+
+.screens {
+  width: 100%;
+  max-width: 1760px;
+  height: calc(100vh - 98px);
+
+  margin: 0 auto;
+}
+
+.screen {
+  display: none;
+}
+
+.screen.is-active {
+  display: block;
+}
+
+/* ---------- Home Screen ---------- */
+
+.home-screen {
+  height: calc(100vh - 98px);
+
+  display: none;
+
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 0.5fr);
+  grid-template-rows: auto 1fr;
+
+  gap: 24px 42px;
+
+  align-items: center;
+}
+
+.home-screen.is-active {
+  display: grid;
+}
+
+.home-copy {
+  max-width: 800px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+
+  color: var(--yellow-dark);
+
+  font-size: 0.95rem;
+  font-weight: 900;
+
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 16px;
+
+  color: var(--text);
+
+  font-size: 4.25rem;
+  line-height: 0.95;
+  font-weight: 950;
+
+  hyphens: auto;
+  overflow-wrap: break-word;
+}
+
+h2 {
+  margin-bottom: 0;
+
+  color: var(--text);
+
+  font-size: 1.25rem;
+  line-height: 1.12;
+  font-weight: 900;
+}
+
+.lead {
+  margin-bottom: 0;
+
+  color: var(--muted-strong);
+
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.home-mark {
+  grid-row: span 2;
+  justify-self: center;
+
+  width: min(22vw, 300px);
+  min-width: 220px;
+  height: auto;
+
+  filter:
+    drop-shadow(0 18px 32px rgba(255, 212, 0, 0.36));
+}
+
+.choice-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 22px;
+}
+
+.choice-card {
+  display: grid;
+
+  min-height: 210px;
+  padding: 28px;
+
+  text-align: left;
+
+  border: 2px solid rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius);
+
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 212, 0, 0.2),
+      transparent 72%
+    ),
+    var(--panel-strong);
+
+  box-shadow: var(--shadow);
+}
+
+.choice-kicker {
+  color: var(--yellow-dark);
+
+  font-size: 1rem;
+  font-weight: 900;
+}
+
+.choice-title {
+  align-self: end;
+
+  font-size: 1.95rem;
+  font-weight: 950;
+  line-height: 1.05;
+}
+
+.choice-copy {
+  color: var(--muted-strong);
+
+  font-size: 1.12rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+/* ---------- Titel ---------- */
+
+.screen-title {
+  margin-bottom: 16px;
+}
+
+.screen-title h1 {
+  margin-bottom: 0;
+
+  font-size: 3.05rem;
+  line-height: 1;
+}
+
+/* ---------- Fahrzeugansicht ---------- */
+
+.vehicle-layout,
+.test-layout {
+  display: grid;
+
+  grid-template-columns: minmax(360px, 0.62fr) minmax(700px, 1.38fr);
+
+  gap: 24px;
+
+  align-items: start;
+}
+
+/* ---------- Karten / Panels ---------- */
+
+.brand-visual,
+.control-section,
+.motor-panel,
+.test-status,
+.graph-panel,
+.pi-status-panel,
+.pi-map-panel {
+  border: 2px solid rgba(15, 23, 42, 0.18);
+  border-radius: var(--radius);
+
+  background: var(--panel);
+
+  box-shadow: var(--shadow);
+}
+
+.brand-visual {
+  position: relative;
+
+  min-height: 455px;
+
+  overflow: hidden;
+
+  display: grid;
+  align-content: center;
+  justify-items: center;
+
+  border-color: rgba(184, 134, 0, 0.4);
+
+  background:
+    linear-gradient(
+      155deg,
+      rgba(255, 212, 0, 0.2),
+      transparent 46%
+    ),
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.95),
+      transparent
+    ),
+    var(--panel);
+}
+
+.brand-visual::before {
+  content: "";
+
+  position: absolute;
+  inset: 20px;
+
+  border: 2px solid rgba(255, 212, 0, 0.32);
+  border-radius: var(--radius);
+}
+
+.big-b {
+  position: relative;
+  z-index: 1;
+
+  display: block;
+
+  width: min(44%, 245px);
+  height: auto;
+
+  object-fit: contain;
+
+  filter:
+    drop-shadow(0 16px 30px rgba(255, 212, 0, 0.42));
+}
+
+/* ---------- Telemetrie ---------- */
+
+.telemetry-strip {
+  position: absolute;
+  z-index: 2;
+
+  left: 18px;
+  right: 18px;
+  bottom: 18px;
+
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 10px;
+}
+
+.telemetry-strip > div {
+  min-height: 78px;
+  padding: 12px;
+
+  border: 2px solid rgba(15, 23, 42, 0.16);
+  border-radius: var(--radius);
+
+  background: rgba(255, 255, 255, 0.96);
+
+  box-shadow:
+    0 7px 15px rgba(15, 23, 42, 0.08);
+}
+
+.telemetry-label {
+  display: block;
+
+  margin-bottom: 7px;
+
+  color: var(--muted);
+
+  font-size: 0.86rem;
+  font-weight: 850;
+}
+
+.telemetry-strip strong {
+  color: var(--text);
+
+  font-size: 1.38rem;
+  font-weight: 950;
+}
+
+/* ---------- Steuerbereich ---------- */
+
+.control-bank {
+  display: grid;
+
+  gap: 14px;
+}
+
+.control-section,
+.motor-panel,
+.test-status,
+.graph-panel,
+.pi-status-panel,
+.pi-map-panel {
+  padding: 18px;
+}
+
+.section-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 14px;
+
+  margin-bottom: 12px;
+}
+
+.section-heading span,
+.status-label {
+  color: var(--muted);
+
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+
+  gap: 12px;
+}
+
+.control-button {
+  position: relative;
+
+  display: grid;
+  align-content: center;
+
+  min-height: 94px;
+  padding: 16px;
+
+  text-align: left;
+
+  background: #ffffff;
+}
+
+.control-button::after {
+  content: "";
+
+  position: absolute;
+  top: 13px;
+  right: 13px;
+
+  width: 13px;
+  height: 13px;
+
+  border-radius: 50%;
+
+  background: #cbd5e1;
+
+  border: 2px solid rgba(15, 23, 42, 0.18);
+}
+
+.control-button.is-active {
+  color: #111827;
+
+  border-color: var(--yellow-dark);
+
+  background:
+    linear-gradient(
+      180deg,
+      var(--yellow),
+      #e8b900
+    );
+
+  box-shadow:
+    0 14px 28px rgba(255, 212, 0, 0.44);
+}
+
+.control-button.is-active::after {
+  background: #111827;
+  border-color: #111827;
+}
+
+.control-label {
+  margin-bottom: 7px;
+
+  font-size: 1.18rem;
+  font-weight: 950;
+  line-height: 1.08;
+}
+
+.control-gpio {
+  color: var(--muted-strong);
+
+  opacity: 1;
+
+  font-size: 0.98rem;
+  font-weight: 800;
+}
+
+/* ---------- Motor ---------- */
+
+.motor-panel {
+  grid-column: 1 / -1;
+}
+
+.motor-output {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+
+  gap: 18px;
+
+  margin-bottom: 12px;
+}
+
+.motor-output strong {
+  color: var(--text);
+
+  font-size: 3.25rem;
+  line-height: 1;
+  font-weight: 950;
+}
+
+.motor-output span {
+  color: var(--yellow-dark);
+
+  font-size: 2.1rem;
+  font-weight: 950;
+}
+
+.motor-slider {
+  width: 100%;
+  height: 34px;
+
+  accent-color: var(--yellow);
+
+  cursor: pointer;
+}
+
+.slider-scale {
+  display: flex;
+  justify-content: space-between;
+
+  color: var(--muted-strong);
+
+  font-size: 0.94rem;
+  font-weight: 850;
+}
+
+.technical-note {
+  margin: 10px 0 0;
+
+  color: var(--muted);
+
+  font-size: 0.96rem;
+  font-weight: 650;
+}
+
+/* ---------- Testautomatisierung ---------- */
+
+.tests-screen .screen-title {
+  margin-bottom: 16px;
+}
+
+.test-layout {
+  grid-template-columns:
+    minmax(250px, 0.55fr)
+    minmax(360px, 0.75fr)
+    minmax(560px, 1fr);
+
+  align-items: start;
+}
+
+.test-actions {
+  display: grid;
+
+  gap: 12px;
+}
+
+.test-button {
+  min-height: 82px;
+  padding: 0 18px;
+
+  text-align: left;
+
+  font-size: 1.12rem;
+  font-weight: 900;
+
+  background: #ffffff;
+}
+
+.test-button-strong {
+  color: #111827;
+
+  border-color: var(--yellow-dark);
+
+  background:
+    linear-gradient(
+      180deg,
+      var(--yellow),
+      #e8b900
+    );
+
+  box-shadow:
+    0 12px 26px rgba(255, 212, 0, 0.42);
+}
+
+.test-button[disabled] {
+  cursor: not-allowed;
+
+  opacity: 0.54;
+
+  transform: none;
+}
+
+.status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+
+  gap: 14px;
+
+  margin-bottom: 12px;
+}
+
+#test-state {
+  color: var(--yellow-dark);
+
+  font-size: 1.28rem;
+  font-weight: 950;
+}
+
+.result-banner {
+  min-height: 60px;
+
+  margin-bottom: 12px;
+  padding: 14px;
+
+  border: 2px solid rgba(15, 23, 42, 0.15);
+  border-radius: var(--radius);
+
+  color: var(--muted-strong);
+
+  background: rgba(255, 255, 255, 0.94);
+
+  font-size: 1rem;
+  font-weight: 750;
+}
+
+.result-banner.is-ok {
+  color: #064e3b;
+
+  border-color: rgba(0, 159, 93, 0.6);
+
+  background: rgba(0, 159, 93, 0.18);
+}
+
+.result-banner.is-error {
+  color: #7f1d1d;
+
+  border-color: rgba(214, 40, 40, 0.6);
+
+  background: rgba(214, 40, 40, 0.16);
+}
+
+.test-log {
+  display: grid;
+
+  gap: 8px;
+
+  max-height: 265px;
+
+  margin: 0;
+  padding-left: 22px;
+
+  overflow: auto;
+
+  color: var(--muted-strong);
+
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.test-log li {
+  padding: 10px 11px;
+
+  border-radius: var(--radius);
+
+  background: rgba(15, 23, 42, 0.055);
+}
+
+/* ---------- Live Graph ---------- */
+
+.graph-panel {
+  min-width: 0;
+}
+
+#live-chart {
+  display: block;
+
+  width: 100%;
+  height: auto;
+
+  aspect-ratio: 8 / 3;
+
+  border: 2px solid rgba(15, 23, 42, 0.14);
+  border-radius: var(--radius);
+
+  background: #ffffff;
+}
+
+.graph-legend {
+  display: flex;
+  flex-wrap: wrap;
+
+  gap: 14px;
+
+  margin-top: 12px;
+
+  color: var(--muted-strong);
+
+  font-size: 0.95rem;
+  font-weight: 850;
+}
+
+.graph-legend span::before {
+  content: "";
+
+  display: inline-block;
+
+  width: 24px;
+  height: 4px;
+
+  margin-right: 8px;
+
+  vertical-align: middle;
+
+  border-radius: 99px;
+}
+
+.legend-current::before {
+  background: var(--yellow);
+}
+
+.legend-voltage::before {
+  background: var(--cyan);
+}
+
+.legend-pwm::before {
+  background: var(--green);
+}
+
+/* ---------- Pi & Relais ---------- */
+
+.pi-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.55fr) minmax(700px, 1.45fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.pi-status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pi-status-grid > div,
+.pi-output-item {
+  min-height: 94px;
+  padding: 16px;
+  border: 2px solid rgba(15, 23, 42, 0.14);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.pi-status-grid span,
+.pi-output-item span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 850;
+}
+
+.pi-status-grid strong,
+.pi-output-item strong {
+  color: var(--text);
+  font-size: 1.2rem;
+  font-weight: 950;
+  line-height: 1.1;
+}
+
+.pi-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.pi-action-button {
+  min-height: 76px;
+  padding: 0 18px;
+  text-align: left;
+  background: #ffffff;
+}
+
+.pi-action-danger {
+  color: #7f1d1d;
+  border-color: rgba(214, 40, 40, 0.5);
+}
+
+.pi-action-status {
+  min-height: 48px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 2px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--radius);
+  color: var(--muted-strong);
+  background: rgba(15, 23, 42, 0.045);
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.pi-action-status.is-ok {
+  color: #064e3b;
+  border-color: rgba(0, 159, 93, 0.55);
+  background: rgba(0, 159, 93, 0.16);
+}
+
+.pi-action-status.is-error {
+  color: #7f1d1d;
+  border-color: rgba(214, 40, 40, 0.55);
+  background: rgba(214, 40, 40, 0.16);
+}
+
+.pi-output-map {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.pi-output-item {
+  position: relative;
+}
+
+.pi-output-item::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #cbd5e1;
+  border: 2px solid rgba(15, 23, 42, 0.18);
+}
+
+.pi-output-item.is-active {
+  border-color: var(--yellow-dark);
+  background:
+    linear-gradient(
+      180deg,
+      var(--yellow),
+      #e8b900
+    );
+  box-shadow:
+    0 14px 28px rgba(255, 212, 0, 0.34);
+}
+
+.pi-output-item.is-active::after {
+  background: #111827;
+  border-color: #111827;
+}
+
+/* ---------- Zurück Button ---------- */
+
+.back-button {
+  display: block;
+  position: fixed;
+  z-index: 30;
+  left: 48px;
+  bottom: 20px;
+
+  min-width: 170px;
+  min-height: 62px;
+
+  margin: 0;
+
+  color: #111827;
+
+  border: 2px solid var(--yellow-dark);
+
+  background:
+    linear-gradient(
+      180deg,
+      var(--yellow),
+      #e8b900
+    );
+
+  font-size: 1.05rem;
+  font-weight: 950;
+
+  box-shadow:
+    0 12px 24px rgba(255, 212, 0, 0.42);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* ---------- 1920x1080 Touchscreen Optimierung ---------- */
+
+@media (min-width: 1600px) and (min-height: 900px) {
+  .app-shell {
+    padding: 72px 48px 26px;
+  }
+
+  .app-header {
+    top: 14px;
+    left: 48px;
+    right: 48px;
+  }
+
+  .screens {
+    max-width: 1780px;
+    height: calc(100vh - 98px);
+  }
+
+  .vehicle-layout {
+    grid-template-columns: 470px 1fr;
+    gap: 26px;
+  }
+
+  .brand-visual {
+    min-height: 455px;
+  }
+
+  .control-grid {
+    gap: 12px;
+  }
+
+  .control-button {
+    min-height: 94px;
+  }
+
+  .control-label {
+    font-size: 1.18rem;
+  }
+
+  .control-gpio {
+    font-size: 0.98rem;
+  }
+
+  .motor-output strong {
+    font-size: 3.25rem;
+  }
+
+  .screen-title h1 {
+    font-size: 3.05rem;
+  }
+}
+
+/* ---------- falls Bildschirm kleiner skaliert oder Browserleiste Platz nimmt ---------- */
+
+@media (max-height: 980px) and (min-width: 1400px) {
+  .app-shell {
+    padding-top: 64px;
+    padding-bottom: 20px;
+  }
+
+  .app-header {
+    top: 10px;
+  }
+
+  .screens {
+    height: calc(100vh - 84px);
+  }
+
+  .screen-title {
+    margin-bottom: 12px;
+  }
+
+  .screen-title h1 {
+    font-size: 2.65rem;
+  }
+
+  .brand-logo {
+    width: clamp(170px, 13vw, 240px);
+  }
+
+  .system-pill,
+  .brand-lockup {
+    min-height: 42px;
+  }
+
+  .system-pill {
+    font-size: 0.92rem;
+  }
+
+  .vehicle-layout {
+    grid-template-columns: 420px 1fr;
+    gap: 20px;
+  }
+
+  .brand-visual {
+    min-height: 390px;
+  }
+
+  .big-b {
+    width: min(42%, 210px);
+  }
+
+  .telemetry-strip > div {
+    min-height: 68px;
+    padding: 10px;
+  }
+
+  .telemetry-label {
+    font-size: 0.78rem;
+    margin-bottom: 5px;
+  }
+
+  .telemetry-strip strong {
+    font-size: 1.22rem;
+  }
+
+  .control-bank {
+    gap: 10px;
+  }
+
+  .control-section,
+  .motor-panel,
+  .test-status,
+  .graph-panel,
+  .pi-status-panel,
+  .pi-map-panel {
+    padding: 14px;
+  }
+
+  .section-heading {
+    margin-bottom: 9px;
+  }
+
+  .section-heading span,
+  .status-label {
+    font-size: 0.85rem;
+  }
+
+  .control-grid {
+    gap: 10px;
+  }
+
+  .control-button {
+    min-height: 82px;
+    padding: 13px;
+  }
+
+  .control-label {
+    font-size: 1.05rem;
+    margin-bottom: 5px;
+  }
+
+  .control-gpio {
+    font-size: 0.88rem;
+  }
+
+  .motor-output {
+    margin-bottom: 8px;
+  }
+
+  .motor-output strong {
+    font-size: 2.8rem;
+  }
+
+  .motor-output span {
+    font-size: 1.8rem;
+  }
+
+  .motor-slider {
+    height: 30px;
+  }
+
+  .technical-note {
+    margin-top: 7px;
+    font-size: 0.86rem;
+  }
+
+  .back-button {
+    min-height: 56px;
+    bottom: 16px;
+    font-size: 0.95rem;
+  }
+}
+
+/* ---------- kleinere Displays / Fallback ---------- */
+
+@media (max-width: 1280px) {
+  body {
+    overflow-y: auto;
+  }
+
+  .app-shell {
+    padding: 78px 28px 40px;
+  }
+
+  .app-header {
+    left: 28px;
+    right: 28px;
+  }
+
+  .back-button {
+    left: 28px;
+  }
+
+  .screens {
+    height: auto;
+    min-height: calc(100vh - 110px);
+  }
+
+  .vehicle-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .test-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .choice-grid,
+  .pi-layout,
+  .pi-status-grid,
+  .pi-output-map,
+  .pi-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-visual {
+    min-height: 360px;
+  }
+}
+
+@media (max-width: 900px) {
+  body {
+    overflow-y: auto;
+  }
+
+  .app-shell {
+    padding: 78px 18px 90px;
+  }
+
+  .app-header {
+    left: 18px;
+    right: 18px;
+  }
+
+  .system-pill {
+    display: none;
+  }
+
+  .brand-logo {
+    width: 180px;
+  }
+
+  h1 {
+    font-size: 2.6rem;
+  }
+
+  .screen-title h1 {
+    font-size: 2rem;
+  }
+
+  .home-screen {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .home-mark {
+    grid-row: auto;
+    width: min(45vw, 210px);
+    min-width: 150px;
+  }
+
+  .choice-grid,
+  .control-grid,
+  .telemetry-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .brand-visual {
+    min-height: 330px;
+  }
+
+  .big-b {
+    width: min(42%, 170px);
+  }
+
+  .telemetry-strip {
+    position: static;
+
+    width: calc(100% - 28px);
+
+    margin: 0 auto 14px;
+  }
+
+  .section-heading {
+    display: block;
+  }
+
+  .section-heading h2 {
+    margin-bottom: 6px;
+  }
+
+  .motor-output strong {
+    font-size: 2.5rem;
+  }
+
+  .motor-output span {
+    font-size: 1.6rem;
+  }
+}
