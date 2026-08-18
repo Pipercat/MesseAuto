@@ -16,8 +16,6 @@ Diese fünf Schritte gelten **für jede Zeile**, auch wenn sie im Feld `task` od
 
 ### Pflichtformat für `notes` nach Bearbeitung
 
-Ein Agent ersetzt `-` bzw. ergänzt vorhandene Notizen mindestens in dieser Struktur:
-
 ```text
 implementation: <kurz was geändert wurde>
 documentation: <welche Datei/Abschnitt aktualisiert wurde>
@@ -58,7 +56,7 @@ Prioritäten: `P0` sicherheits-/fahrkritisch, `P1` Kernfunktion, `P2` Diagnose/K
 - **Software/API/MQTT:** Syntax/Build/Lint soweit vorhanden + gezielter Funktions-/Integrations-Test. Ungültige Eingaben und Reconnect/Timeout testen, wenn sie zum Scope gehören.
 - **UI:** Funktionaler UI-Test inklusive Touch/Pointer-Verhalten und Fehlerzuständen; keine reine HTML-/CSS-Sichtprüfung als alleiniger Test.
 - **Hardware:** Realer Hardwaretest ist für `done` erforderlich, wenn das Acceptance-Kriterium reale Hardware verlangt. Ist die Hardware nicht verfügbar, Task `blocked`, nicht `done`.
-- **Dokumentation/Planung:** Konsistenzprüfung gegen Repo, bestehende Architektur und abhängige Tasks; Links/Bezeichnungen/Pin- und Topic-Angaben validieren. Eine reine Textänderung ohne Konsistenzkontrolle reicht nicht.
+- **Dokumentation/Planung:** Konsistenzprüfung gegen Repo, bestehende Architektur und abhängige Tasks; Links/Bezeichnungen/Pin- und Topic-Angaben validieren.
 - **Simulation:** Reproduzierbares Testszenario mit erwartetem und tatsächlichem Ergebnis dokumentieren.
 - **Dauertest/Latenz:** Gemessene Dauer bzw. Messwerte in `notes` festhalten; keine geschätzten Werte als PASS verwenden.
 
@@ -67,6 +65,9 @@ Prioritäten: `P0` sicherheits-/fahrkritisch, `P1` Kernfunktion, `P2` Diagnose/K
 ```text
 Screen 1 / Raspberry Pi 1
   ├─ Fahrzeug-UI
+  │   ├─ Licht / Blinker / weitere Fahrzeugfunktionen
+  │   ├─ Fahrtrichtung / Geschwindigkeit
+  │   └─ eigener Hold-to-Honk-Hupenbutton
   ├─ Adminübersicht über Logo oben rechts
   ├─ GPIO-Fahrzeugfunktionen
   ├─ 2 motorisierte Drehregler + 2 AS5600 + Stepper
@@ -75,6 +76,8 @@ Screen 1 / Raspberry Pi 1
 
 ESP32 Actor
   ├─ physische Taster / Actor-Funktionen
+  ├─ Taster 8 (GPIO 13) = physische Hupe, press/release
+  ├─ Taster 9/10 bleiben Reserve
   └─ Fahrmotor lokal, Sollwerte per WLAN/MQTT
 
 ESP32 Sensor/Aux
@@ -82,10 +85,13 @@ ESP32 Sensor/Aux
   ├─ Sitzabstand
   └─ Fahrzeughupe lokal über Audio + PAM8406
 
-Raspberry Pi 2
-  ├─ Diagnose
+Raspberry Pi 2 / Screen 2
+  ├─ Live-Diagnose mit echten Zeitachsen
+  ├─ digitale AN/AUS-Zeitspuren für Fahrzeugzustände
+  ├─ Live-Counter, Blinkperioden und Laufzeiten
+  ├─ kontinuierliche Kurven für Mess-/Leistungswerte
   ├─ Tests
-  └─ SQLite-Telemetrie
+  └─ SQLite-Telemetrie / Historie
 
 USB/Serial ESP32 <-> Pi 1
   └─ Legacy-Fallback, im realen Fahrzeug standardmäßig deaktiviert
@@ -105,13 +111,13 @@ USB/Serial ESP32 <-> Pi 1
 | 60 | MA-02-003 | M2 MQTT Basis | todo | P1 | MA-02-002 | MQTT | QoS/Retain-Regeln festlegen: Events nicht retained; Online/State ggf. retained; Commands idempotent; Telemetrie QoS0 möglich. | Reconnect löst keine alten Schaltbefehle aus. | - |
 | 70 | MA-03-001 | M3 Pi1 | done | P0 | - | Pi1/Serial | Serial standardmäßig über `MESSEAUTO_SERIAL_ENABLED=false` deaktivieren; Portscan nur bei expliziter Aktivierung. | Pi 1 startet ohne ESP-USB und öffnet keine Serial-Ports. | Bereits umgesetzt; Legacy-Code bleibt vorhanden. |
 | 80 | MA-03-002 | M3 Pi1 | todo | P1 | MA-02-003 | Pi1/MQTT | Nicht blockierenden MQTT-Client mit Reconnect in Pi 1 integrieren. | Flask/UI/GPIO laufen bei Broker-Ausfall weiter; Reconnect automatisch. | `paho-mqtt` vorgesehen. |
-| 90 | MA-03-003 | M3 Pi1 | todo | P1 | MA-03-002 | Pi1/Actor | Actor-Button-Events 1–10 über MQTT auf bestehendes Mapping abbilden; Reserve 8–10 nur loggen. | Jeder physische Tastendruck löst genau eine erwartete Aktion aus. | Periodische States dürfen UI-Befehle nicht überschreiben. |
+| 90 | MA-03-003 | M3 Pi1 | todo | P1 | MA-03-002 | Pi1/Actor | Actor-Button-Events über MQTT auf bestehendes Mapping abbilden. Taster 1–7 behalten ihre Funktionen; Taster 8 wird später als Hupe mit press/release verarbeitet; Taster 9–10 bleiben Reserve und werden nur geloggt. | Taster 1–7 lösen genau eine erwartete Aktion aus; 9–10 lösen keine Fahrzeugfunktion aus; Taster 8 wird nicht fälschlich als normaler Toggle behandelt. | Periodische States dürfen UI-Befehle nicht überschreiben. |
 | 100 | MA-03-004 | M3 Pi1 | todo | P1 | MA-03-002 | Pi1/Actor | UI/API-Aktorbefehle über `messecar/actor/command` senden und Actor-State zurückführen. | Pi und Actor bleiben logisch synchron; doppelte Nachrichten verursachen keinen Togglefehler. | - |
 | 110 | MA-03-005 | M3 Pi1 | todo | P1 | MA-03-002 | Pi1/Sensor | Temperatur und Sitzabstand aus MQTT-Telemetrie übernehmen und plausibilisieren. | `/api/sensors` zeigt gültige Werte/Fehlerzustände und `last_seen`. | Keine fiktiven Werte bei Fehler. |
 | 120 | MA-03-006 | M3 Pi1 | todo | P2 | MA-03-002 | Pi1/API | `/api/esp32` um `connected`, `transport`, `last_seen`, optional `rssi`, IP und Fehlerstatus erweitern. | MQTT/Serial/Offline-Zustand pro ESP eindeutig sichtbar. | - |
 | 130 | MA-04-001 | M4 ESP Actor | todo | P1 | MA-01-003 | ESP Actor | WLAN-Verbindung mit automatischem Reconnect implementieren; lokale Tasterlogik darf bei WLAN-Ausfall nicht blockieren. | Actor bleibt lokal bedienbar und verbindet sich selbstständig wieder. | - |
 | 140 | MA-04-002 | M4 ESP Actor | todo | P1 | MA-04-001 | ESP Actor/MQTT | MQTT-Client mit eindeutiger Client-ID und Last-Will `offline` implementieren. | Online/Offline wird zuverlässig erkannt. | - |
-| 150 | MA-04-003 | M4 ESP Actor | todo | P1 | MA-04-002 | ESP Actor | Echte entprellte Tastendrücke als einmalige Events publizieren. | Kein periodisches Wiederholen alter Tastendrücke. | - |
+| 150 | MA-04-003 | M4 ESP Actor | todo | P1 | MA-04-002 | ESP Actor | Echte entprellte Tastendrücke als einmalige Events publizieren; normale Taster als Press-Event, der spätere Hupentaster muss zusätzlich Release-Zustand übertragen können. | Kein periodisches Wiederholen alter Tastendrücke; Eventmodell unterstützt für Taster 8 eindeutig `pressed` und `released`. | - |
 | 160 | MA-04-004 | M4 ESP Actor | todo | P1 | MA-04-002 | ESP Actor | Commands für Licht/Blinker/Warnblinker/Lüfter empfangen und neuen State publizieren. | Bekannte Funktionen reagieren; unbekannte Commands werden sicher ignoriert. | - |
 | 170 | MA-05-001 | M5 ESP Sensor/Aux | todo | P1 | MA-01-003 | ESP Sensor/Aux | WLAN + MQTT mit Reconnect, eindeutiger Client-ID, Last-Will und Online-State ergänzen. | Sensor/Aux verbindet nach Neustart automatisch. | Später zusätzlich Hupe, siehe M11. |
 | 180 | MA-05-002 | M5 ESP Sensor/Aux | todo | P1 | MA-05-001 | ESP Sensor/Aux | Temperatur und Sitzabstand regelmäßig publizieren; Medianfilter der Distanz beibehalten. | Standardmäßig stabile Telemetrie etwa 1 Hz; Rate konfigurierbar. | - |
@@ -119,10 +125,16 @@ USB/Serial ESP32 <-> Pi 1
 | 200 | MA-06-001 | M6 Sicherheit | done | P0 | - | Hardware | Ground-Regel dokumentieren: ESPs und Pi im realen Fahrzeug nicht dauerhaft per USB verbinden; Serial nur in galvanisch sicherem Aufbau. | Warnhinweis im Repo vorhanden. | Bereits dokumentiert. |
 | 210 | MA-06-002 | M6 Sicherheit | todo | P0 | MA-03-002 | Gesamt | Kommunikationsausfall definieren: keine spontanen GPIO-/Aktorschaltungen; States als stale/offline markieren; alte Commands nicht wiederholen. | Broker/ESP-Ausfall erzeugt keine unbeabsichtigte Fahrzeugaktion. | - |
 | 220 | MA-06-003 | M6 Sicherheit | todo | P0 | MA-03-004 | Pi1/Actor | `/api/all-off` lokal erhalten und passende Off-Commands über MQTT senden. | All-Off funktioniert mit und ohne erreichbaren Actor deterministisch. | Fahrmotor/Hupe separat über ihre Fail-Safes. |
-| 230 | MA-07-001 | M7 Pi2 Diagnose | todo | P2 | MA-03-006 | Pi2 | ESP-Kommunikationsart, Online/Offline, RSSI und `last_seen` im Diagnose-Screen anzeigen. | Fehlerquelle ohne SSH erkennbar. | - |
+| 230 | MA-07-001 | M7 Screen2 Diagnose | todo | P1 | MA-03-006 | Pi2/Screen2 | Screen 2 als echte Live-Diagnose statt reine Durchschnittsanzeige auslegen. Aktuelle Zustände, letzte Änderung und Live-Daten müssen primär sichtbar sein; Durchschnittswerte dürfen nur ergänzende Summary-Karten sein. | Während einer Fahrzeugaktion ist auf Screen 2 innerhalb der Update-Latenz der aktuelle Zustand und Zeitpunkt der letzten Änderung sichtbar. | Keine reine Mittelwert-/Statistikseite. |
+| 232 | MA-07-001A | M7 Screen2 Live States | todo | P1 | MA-07-001 | Pi2/Screen2 | Digitale Live-Zeitspuren mit gemeinsamer Zeitachse für mindestens Blinker links, Blinker rechts, Warnblinker, Abblendlicht, Fernlicht, Unterbodenlicht, Lüfter, Hupe und `motor_enabled` implementieren. Darstellung als echte 0/1- bzw. AUS/AN-Stufenlinie, nicht geglättet. Standardfenster z. B. letzte 60 s, später auswählbar. | Ein AN/AUS-Wechsel erzeugt exakt zum Ereigniszeitpunkt eine sichtbare Stufe; parallele Spuren lassen sich zeitlich vergleichen. | Digitale Signale niemals als Mittelwertlinie darstellen. |
+| 234 | MA-07-001B | M7 Screen2 Counter | todo | P1 | MA-07-001A | Pi2/Screen2 | Live-Zeitcounter pro relevanter Funktion vorsehen: aktueller Zustand seit X ms/s, kumulierte AN-Zeit seit Start/Testbeginn, Anzahl Aktivierungen/Flanken und Zeit seit letzter Änderung. Für Blinker zusätzlich Anzahl Blinkzyklen, aktuelle Periodendauer und daraus berechnete Blinkfrequenz anzeigen. | Bei simulierten/realen Blinkimpulsen steigen Zykluszähler korrekt; aktuelle ON-/OFF-Dauer läuft live und setzt beim Flankenwechsel korrekt zurück. | Counter müssen aus Ereigniszeitstempeln entstehen, nicht aus UI-Refreshs geschätzt werden. |
+| 236 | MA-07-001C | M7 Screen2 Live Curves | todo | P1 | MA-07-001 | Pi2/Screen2 | Kontinuierliche Live-Zeitreihen für mindestens `speed_target`, angewandten Speed soweit vorhanden, Temperatur, Sitzabstand, ESP-RSSI und relevante Kommunikationslatenz darstellen. Zeitfenster z. B. 10 s / 60 s / 5 min umschaltbar; aktuelle Werte zusätzlich numerisch anzeigen. | Werteverlauf ist live sichtbar, Zeitachse korrekt und Messpunkte werden weder zu einem einzigen Durchschnitt verdichtet noch zeitlich vertauscht. | Weitere kontinuierliche Messwerte können später ergänzt werden. |
+| 238 | MA-07-001D | M7 Screen2 Event Model | todo | P1 | MA-07-001A | Pi2/Telemetry | Für digitale Zustände eine ereignisbasierte Historie mit `timestamp`, `signal`, `old_state`, `new_state`, `source` vorsehen; für kontinuierliche Messwerte zeitgestempelte Samples. Pi 2 muss aus diesen Daten Live-Spuren, Counter und Historie reproduzierbar berechnen können. | Neustart des Screen-Frontends verliert nicht die zugrunde liegende Ereignislogik; aus gespeicherten Events lässt sich der Zustand/Verlauf korrekt rekonstruieren. | UI-Refresh darf keine künstlichen Schalt-Events erzeugen. |
 | 240 | MA-07-002 | M7 Pi2 Diagnose | todo | P1 | MA-06-002 | Pi2/Test | Testfälle Broker offline, Actor offline, Sensor/Aux offline und Reconnect hinzufügen. | Kein unbeabsichtigtes Schalten bei allen Fehlerfällen. | - |
-| 250 | MA-07-003 | M7 Pi2 Diagnose | todo | P2 | MA-07-001 | Pi2/SQLite | Netzwerk-/ESP-Status optional in Telemetrie speichern, inkl. RSSI/Reconnects. | Verlauf von Verbindungsproblemen auswertbar. | - |
-| 260 | MA-08-001 | M8 Simulation | todo | P2 | MA-02-003 | Simulation | MQTT-Nachrichtenfluss, Online/Offline, Button-Events und Sensor-Telemetrie simulieren. | Kernkommunikation ohne Fahrzeughardware testbar. | - |
+| 242 | MA-07-002A | M7 Screen2 Live Tests | todo | P1 | MA-07-001D,MA-07-002 | Pi2/Test | Live-Diagnose mit definierten Signalfolgen testen: Blinker 10 Zyklen, Licht EIN/AUS, Hupe halten/lösen, Motor enabled/disabled und variable Speed-/Sensorwerte. Erwartete Flanken, Zeiten, Counter und Kurven mit tatsächlicher Anzeige vergleichen. | Für die Testsequenz stimmen Anzahl Flanken/Zyklen, Zeitstempel-Reihenfolge und Zustände; keine verlorenen oder erfundenen Events. | Testnachweis mit gemessenen Counterwerten in `notes`. |
+| 250 | MA-07-003 | M7 Pi2 Diagnose | todo | P2 | MA-07-001 | Pi2/SQLite | Netzwerk-/ESP-Status sowie digitale Zustandsereignisse und kontinuierliche Samples in Telemetrie speichern, inkl. RSSI/Reconnects. Aufbewahrung so begrenzen, dass die DB nicht unkontrolliert wächst. | Verlauf von Verbindungs- und Fahrzeugzuständen ist historisch auswertbar; DB-Größe bleibt kontrollierbar. | Live-Puffer und Langzeitdaten dürfen unterschiedliche Auflösung verwenden. |
+| 252 | MA-07-004 | M7 Screen2 UX | todo | P2 | MA-07-001A,MA-07-001B,MA-07-001C | Pi2/Screen2 | Screen 2 in klar getrennte Bereiche gliedern: `LIVE ZUSTÄNDE`, `COUNTER/ZEITEN`, `MESSWERTE`, `NETZWERK`, `TESTS`. Aktive Fehler/Offline-Zustände sollen die zugehörige Spur/Karte eindeutig markieren, ohne Live-Daten zu verdecken. | Ein Techniker erkennt binnen Sekunden aktuellen Zustand, Verlauf und Counter derselben Funktion. | Keine überladene reine Tabellenansicht. |
+| 260 | MA-08-001 | M8 Simulation | todo | P2 | MA-02-003 | Simulation | MQTT-Nachrichtenfluss, Online/Offline, Button-Events, Sensor-Telemetrie und die für Screen 2 benötigten digitalen Flanken/Live-Zeitreihen simulieren. | Kernkommunikation und Screen-2-Live-Diagnose ohne Fahrzeughardware testbar. | - |
 | 270 | MA-08-002 | M8 Simulation | todo | P2 | MA-08-001 | Simulation | Broker-Ausfall, verzögerte Telemetrie, ungültiges JSON und Reconnect simulieren. | Fehlerfälle reproduzierbar und erwartetes Verhalten sichtbar. | - |
 | 280 | MA-09-001 | M9 Integration | todo | P1 | MA-04-004,MA-05-003 | Gesamt | Volltest ausschließlich über WLAN/MQTT ohne ESP↔Pi-USB durchführen. | Alle Fahrzeugfunktionen, Taster und Sensoren funktionieren. | - |
 | 290 | MA-09-002 | M9 Integration | todo | P1 | MA-09-001 | Gesamt | 30-Minuten-Dauertest mit Reconnects durchführen. | Keine spontanen GPIO-Impulse, verlorenen Reconnects oder alten Events. | - |
@@ -162,21 +174,23 @@ USB/Serial ESP32 <-> Pi 1
 | 630 | MA-11-003 | M11 Hupe | todo | P0 | MA-11-002 | Audio/Hardware | PAM8406 als reinen Audio-Leistungsverstärker dokumentieren; Versorgung, Eingang, Lautsprecherimpedanz/-leistung und Masseführung prüfen. | Elektrisch sicherer Audio-Pfad ohne neue Pi-GND-Verbindung festgelegt. | PAM8406 nicht als Tongenerator behandeln. |
 | 640 | MA-11-004 | M11 Hupe | todo | P1 | MA-11-002,MA-11-003 | Audio/Hardware | Audiopfad festlegen: interner DAC falls geeignet, sonst I2S-DAC/Codec, gefilterte PWM nur wenn ausreichend. | Sauberes Eingangssignal am PAM8406 im Hardwaretest. | - |
 | 650 | MA-11-005 | M11 Hupe | todo | P2 | MA-11-004 | Audio | Realistischen Fahrzeug-Hupenton festlegen; bevorzugt lokaler Sample-Loop oder geeignete Synthese; Lautstärke begrenzen. | Klangquelle, Format/Samplerate und Maximalpegel definiert. | Kein Audio-Streaming übers WLAN. |
-| 660 | MA-11-006 | M11 Hupe | todo | P1 | MA-11-005 | UI/Audio | Hold-to-Honk-Verhalten definieren: press=start, release/cancel=stop, niemals Toggle. | Hupe nur aktiv, solange Benutzer gedrückt hält. | - |
+| 660 | MA-11-006 | M11 Hupe | todo | P1 | MA-11-005 | UI/Audio | Einheitliches Hold-to-Honk-Verhalten für **beide Eingabequellen** definieren: physischer Taster und Screen-1-Hupenbutton. Press=start, Release/Cancel=stop, niemals Toggle. | Hupe ist nur aktiv, solange mindestens eine gültige Eingabequelle gehalten wird. | Freigabe einer Quelle darf Hupe nicht stoppen, wenn die andere Quelle weiterhin gedrückt ist. |
+| 665 | MA-11-006A | M11 Hupe Physical Button | todo | P1 | MA-04-003,MA-11-006 | ESP Actor/Pi1 | **Taster 8 / GPIO 13 des ESP Actor verbindlich als physische Hupe belegen.** Taster 9 / GPIO 26 und Taster 10 / GPIO 32 bleiben Reserve. Für Taster 8 sowohl Press- als auch Release-Flanke entprellt übertragen; Pi 1 führt diese Quelle dem zentralen Horn-Controller zu. | Gedrückt halten von T8 aktiviert die Horn-Anforderung, Loslassen deaktiviert sie; kurzer/mehrfacher Tastendruck erzeugt keine hängende Hupe; T9/T10 bleiben funktionslos/reserviert. | Hardwarebelegung anschließend in HARDWARE.md nachführen. |
 | 670 | MA-11-007 | M11 Hupe MQTT | todo | P1 | MA-02-003,MA-11-006 | MQTT/Horn | Topic `messecar/horn/command`; Payload mit `device`,`seq`,`timestamp_ms`,`active`; nicht retained. | Absolute, idempotente Start/Stop-Befehle. | - |
+| 675 | MA-11-007A | M11 Hupe Input Merge | todo | P0 | MA-11-006A,MA-11-007 | Pi1/Horn | Zentralen Horn-Input-State auf Pi 1 implementieren: mindestens `physical_pressed` und `screen_pressed`. Effektiver Sollzustand = logisches ODER der gültigen Quellen. Jede Flanke aktualisiert sofort den effektiven Zustand und nur Zustandsänderungen werden als Horn-Command weitergegeben; Keepalive läuft solange der effektive Zustand true ist. | Physische und Screen-Hupe können gleichzeitig benutzt werden; Loslassen einer Quelle stoppt die Hupe erst, wenn keine Quelle mehr gehalten wird. | Verhindert Race zwischen physischem Taster und Touchscreen. |
 | 680 | MA-11-008 | M11 Hupe MQTT | todo | P2 | MA-11-007 | MQTT/Horn | Topic `messecar/horn/state`; ESP meldet `active`, `audio_ok`, optional RSSI/Fehler. | Pi unterscheidet Soll- und bestätigten Hupenzustand. | - |
-| 690 | MA-11-009 | M11 Hupe MQTT | todo | P1 | MA-11-007 | MQTT/Horn | Hupenlatenz optimieren: nur Steuerbefehle übertragen; Ziel Screen→Audio typisch <100 ms. | 100 Start/Stop-Vorgänge ohne merkliche Verzögerung oder verlorenen Stop. | - |
-| 700 | MA-11-010 | M11 Hupe Safety | todo | P0 | MA-11-007 | ESP Sensor/Aux | Hupen-Lease/Keepalive: Pi sendet bei gedrückter Hupe ca. 10 Hz; kein Keepalive für zunächst 300 ms → lokal Hupe aus. | WLAN-/Brokerverlust bei gedrückter Hupe verstummt automatisch. | Timeout später testen. |
+| 690 | MA-11-009 | M11 Hupe MQTT | todo | P1 | MA-11-007 | MQTT/Horn | Hupenlatenz optimieren: nur Steuerbefehle übertragen; Ziel Screen/Physiktaster→Audio typisch <100 ms. | Je 100 Start/Stop-Vorgänge über Screen und physischen Taster ohne merkliche Verzögerung oder verlorenen Stop. | - |
+| 700 | MA-11-010 | M11 Hupe Safety | todo | P0 | MA-11-007 | ESP Sensor/Aux | Hupen-Lease/Keepalive: Pi sendet bei effektiver Hupe ca. 10 Hz; kein Keepalive für zunächst 300 ms → lokal Hupe aus. | WLAN-/Brokerverlust bei gedrückter Hupe verstummt automatisch. | Timeout später testen. |
 | 710 | MA-11-011 | M11 Hupe Safety | todo | P0 | MA-11-010 | ESP Sensor/Aux | Sequenznummern verwenden; alte/doppelte `active=true` ignorieren; retained Horn-Command verboten. | Verspätete Pakete können Hupe nicht unbeabsichtigt starten. | - |
-| 720 | MA-11-012 | M11 Hupe Safety | todo | P0 | MA-11-010 | Pi1/ESP Aux | Boot/Reconnect immer Hupe AUS; erst neuer aktueller Press darf starten. | Broker-/ESP-/Pi-Neustart bleibt akustisch sicher. | - |
-| 730 | MA-11-013 | M11 Hupe UI | todo | P1 | MA-11-006 | Screen1 | Touch-Hupenbutton mit pointer/touch down/up/cancel und sichtbarem Press-State planen. | Verlassen/Abbruch des Touchs sendet sicher `active=false`. | Kein Click-Toggle. |
-| 740 | MA-11-014 | M11 Hupe Pi1 | todo | P1 | MA-11-007,MA-11-013 | Pi1 | Horn-Controller: bei press sofort true+Keepalive; bei release/cancel sofort false; MQTT-Ausfall darf UI nicht blockieren. | Zustandsautomat eindeutig und fail-safe. | - |
+| 720 | MA-11-012 | M11 Hupe Safety | todo | P0 | MA-11-010 | Pi1/ESP Aux | Boot/Reconnect immer Hupe AUS; erst neue aktuelle Eingabe darf starten. | Broker-/ESP-/Pi-Neustart bleibt akustisch sicher. | - |
+| 730 | MA-11-013 | M11 Hupe UI | todo | P1 | MA-11-006 | **Screen 1** | **Gut sichtbaren Fahrzeug-Hupenbutton direkt auf Screen 1 integrieren.** Echte Pointer/Touch-Down-, Up-, Leave- und Cancel-Events verwenden; gedrückter Zustand visuell deutlich anzeigen. Kein Click-Toggle. | Button ist auf der normalen Fahrzeugoberfläche vorhanden; Halten hupt, Loslassen/Verlassen/Touch-Cancel beendet die Screen-Anforderung sicher. | Hupenbutton gehört zur normalen Fahrzeugbedienung, nicht nur zur Adminseite. |
+| 740 | MA-11-014 | M11 Hupe Pi1 | todo | P1 | MA-11-007,MA-11-013,MA-11-006A | Pi1 | Horn-Controller für Screen- und physischen Input: bei effektiver Press-Anforderung sofort true+Keepalive; bei vollständigem Release sofort false; MQTT-Ausfall darf UI nicht blockieren. | Zustandsautomat eindeutig und fail-safe; beide Eingabequellen funktionieren unabhängig und kombiniert. | - |
 | 750 | MA-11-015 | M11 Hupe ESP | todo | P1 | MA-11-004,MA-11-010 | ESP Sensor/Aux | Lokalen nicht blockierenden Horn-Controller/Audio-Task implementieren; Sensoren und MQTT laufen parallel. | Hupe, Sensorik und Netzwerk gleichzeitig stabil. | - |
-| 760 | MA-11-016 | M11 Hupe Diagnose | todo | P2 | MA-11-015 | ESP/Pi2 | Audiozustände `ready/playing/stopped/audio_error` und Fehlercodes publizieren/anzeigen. | Audiofehler führen sicher zu Hupe AUS und sind diagnostizierbar. | - |
-| 770 | MA-11-017 | M11 Hupe Simulation | todo | P2 | MA-11-014,MA-11-015 | Simulation | Press/hold/release, Command/State und optional Browser-Sound simulieren. | Kommunikationslogik ohne Hardware testbar. | - |
-| 780 | MA-11-018 | M11 Hupe Simulation | todo | P1 | MA-11-017 | Simulation | Verlorenes release, Brokerverlust, altes true, ESP-Reboot simulieren. | In jedem Fall fällt Hupe innerhalb Fail-Safe auf AUS. | - |
-| 790 | MA-11-019 | M11 Hupe Hardwaretest | todo | P0 | MA-11-015 | Audio/Hardware | Audio-Pfad mit geringer Lautstärke testen; PAM8406-Versorgung/Pegel/Lautsprechererwärmung prüfen; kurzer Dauerhupentest. | Stabiler Ton ohne ESP-Reset, Sensorfehler oder Überhitzung. | Akustische Sicherheit beachten. |
-| 800 | MA-11-020 | M11 Hupe Integration | todo | P1 | MA-11-019,MA-10-030 | Gesamt | WLAN-Latenz und Parallelbetrieb von Drive, Sensorik und Hupe mit mindestens 100 Hupvorgängen testen. | Keine hängende Hupe; Fahrsteuerung bleibt reaktionsschnell. | - |
+| 760 | MA-11-016 | M11 Hupe Diagnose | todo | P2 | MA-11-015 | ESP/Pi2 | Audiozustände `ready/playing/stopped/audio_error`, Soll-/Ist-Hupenzustand und Fehlercodes publizieren/anzeigen; Hupen-AN/AUS-Flanken müssen zusätzlich in Screen-2-Live-Zeitspur einfließen. | Audiofehler führen sicher zu Hupe AUS und sind diagnostizierbar; Hupenzeitspur zeigt echte Aktivierungsdauer. | - |
+| 770 | MA-11-017 | M11 Hupe Simulation | todo | P2 | MA-11-014,MA-11-015 | Simulation | Physical press/release, Screen press/hold/release, Input-Merge, Command/State und optional Browser-Sound simulieren. | Kommunikationslogik beider Eingabequellen ohne Hardware testbar. | - |
+| 780 | MA-11-018 | M11 Hupe Simulation | todo | P1 | MA-11-017 | Simulation | Verlorenes release, Brokerverlust, altes true, ESP-Reboot sowie gleichzeitige physische+Screen-Bedienung simulieren. | In jedem Fehlerfall fällt Hupe innerhalb Fail-Safe auf AUS; bei zwei gehaltenen Quellen stoppt Release einer Quelle nicht zu früh. | - |
+| 790 | MA-11-019 | M11 Hupe Hardwaretest | todo | P0 | MA-11-015,MA-11-006A | Audio/Hardware | Audio-Pfad mit geringer Lautstärke testen; PAM8406-Versorgung/Pegel/Lautsprechererwärmung prüfen; physischen T8 und Screen-1-Button real testen; kurzer Dauerhupentest. | Stabiler Ton ohne ESP-Reset, Sensorfehler oder Überhitzung; beide Bedienwege funktionieren zuverlässig. | Akustische Sicherheit beachten. |
+| 800 | MA-11-020 | M11 Hupe Integration | todo | P1 | MA-11-019,MA-10-030 | Gesamt | WLAN-Latenz und Parallelbetrieb von Drive, Sensorik und Hupe mit mindestens 100 Hupvorgängen je Eingabeart testen. Screen 2 muss Hupenflanken und Laufzeiten live korrekt darstellen. | Keine hängende Hupe; Fahrsteuerung bleibt reaktionsschnell; Screen-2-Zeitspur/Counter stimmen mit Testablauf überein. | - |
 | 810 | MA-12-001 | M12 Admin UI | todo | P2 | MA-03-006 | Screen1 | Klick/Tap auf Logo oben rechts öffnet versteckte Adminübersicht; kein großer sichtbarer Adminbutton. | Touch-Navigation zuverlässig; normale UI unbeeinträchtigt. | - |
 | 820 | MA-12-002 | M12 Admin UI | todo | P2 | MA-12-001 | Screen1 | Klaren Rückweg `Zurück zum Fahrzeug` und optional Inaktivitäts-Timeout definieren. | Adminmodus jederzeit sicher verlassbar; Reload wiederholt keine Aktion. | - |
 | 830 | MA-12-003 | M12 Admin Safety | todo | P0 | MA-12-001 | Admin | Kritische Aktionen immer bestätigen; Zielgerät+Aktion im Dialog; optional PIN-Sperre später. | Kein Reboot/Shutdown/Service-Restart durch einen versehentlichen Tap. | - |
@@ -205,13 +219,13 @@ USB/Serial ESP32 <-> Pi 1
 | 1060 | MA-12-026 | M12 Dial Diagnose | todo | P2 | MA-10-028 | Admin | Beide motorisierten Dials mit Ist-/Sollwinkel, Prozent/Richtung, Hall-, Stepper-, TCA9548A-, Kalibrier- und Fehlerstatus anzeigen. | Dial-Fehler ohne Debugkonsole eingrenzbar. | - |
 | 1070 | MA-12-027 | M12 Drive Diagnose | todo | P1 | MA-10-024 | Admin | Fahrmotorstatus: Actor online, Sollrichtung/-speed, angewandter Zustand, Heartbeat-Alter, Failsafe, letzte seq. | Pi/ESP-State-Abweichung sofort sichtbar. | - |
 | 1080 | MA-12-028 | M12 Sensor Diagnose | todo | P2 | MA-05-003 | Admin | Temperatur, Sitzabstand/-position, Sensorfehler, Alter der letzten Messung und optionale Rohwerte anzeigen. | Sensorzustand zentral nachvollziehbar. | - |
-| 1090 | MA-12-029 | M12 Horn Diagnose | todo | P2 | MA-11-016 | Admin | Hupe: Soll/ist active, audio_ok, Lease-Alter, letzter Command, Aux-ESP-Status und Audiofehler anzeigen. | Hupenproblem eindeutig lokalisierbar. | - |
+| 1090 | MA-12-029 | M12 Horn Diagnose | todo | P2 | MA-11-016 | Admin | Hupe: physischer Input, Screen-Input, effektiver Sollzustand, Istzustand, `audio_ok`, Lease-Alter, letzter Command, Aux-ESP-Status und Audiofehler anzeigen. | Hupenproblem und Eingabequelle eindeutig lokalisierbar. | - |
 | 1100 | MA-12-030 | M12 Logs | todo | P2 | MA-12-001 | Admin/Pi1/Pi2 | Zentralen Ereignis-/Fehlerbereich vorsehen: Reconnects, Failsafes, Sensorfehler, Service-/Rebootaktionen; begrenzte Historie statt unendlicher Logs. | Letzte relevante Störung schnell auffindbar. | Keine sensiblen Secrets anzeigen. |
 | 1110 | MA-12-031 | M12 Admin API | todo | P1 | MA-12-007,MA-12-030 | Pi1/Pi2 | Strukturierte System-Metrics-/Health-API für Adminseite definieren; keine Shell-Ausgaben direkt an UI durchreichen. | UI erhält validierte strukturierte Daten. | - |
 | 1120 | MA-12-032 | M12 Admin API | todo | P0 | MA-12-003,MA-12-031 | Pi1/Pi2 | Whitelist-Adminaktionen implementieren: nur explizite Service-/Reboot-/Shutdown-/ESP-Kommandos, keine beliebigen Befehle. | Keine allgemeine Remote-Shell über Weboberfläche. | - |
 | 1130 | MA-12-033 | M12 Admin Tests | todo | P1 | MA-12-032 | Simulation/Test | Adminaktionen in Simulation/Testmodus prüfen: Bestätigung, Fehlerantwort, Timeout, Ziel offline, Reconnect. | Kein falscher Erfolgsstatus; UI bleibt bedienbar. | - |
 | 1140 | MA-12-034 | M12 Admin Tests | todo | P0 | MA-12-020,MA-12-023 | Hardwaretest | Sichere Reboots mit Motor/Hupe/Stepper in verschiedenen Zuständen hardwareseitig prüfen. | Vor jedem kritischen Neustart werden Aktoren sicher. | - |
-| 1150 | MA-12-035 | M12 Finish | todo | P1 | MA-12-034,MA-10-030,MA-11-020 | Gesamt | End-to-End-Abnahme: normale UI, Logo→Admin, alle Metrics, Netz/Services, Drive/Dials/Sensor/Hupe, sichere Adminaktionen und Rückkehr zur UI. | Gesamtsystem mindestens 30 Minuten stabil; keine kritischen unbeabsichtigten Aktionen. | Abschluss der aktuellen Backlog-Version. |
+| 1150 | MA-12-035 | M12 Finish | todo | P1 | MA-12-034,MA-10-030,MA-11-020,MA-07-002A | Gesamt | End-to-End-Abnahme: normale UI inkl. Screen-1-Hupe, physischer T8-Hupentaster, Logo→Admin, Screen-2-Live-Zeitspuren/Counter/Kurven, alle Metrics, Netz/Services, Drive/Dials/Sensor/Hupe und sichere Adminaktionen. | Gesamtsystem mindestens 30 Minuten stabil; keine kritischen unbeabsichtigten Aktionen; Screen 2 zeigt Live-Zustände ohne Eventverluste. | Abschluss der aktuellen Backlog-Version. |
 
 ## Definition of Done für die gesamte Task-Datenbank
 
@@ -224,7 +238,10 @@ Die aktuelle MesseCar-Ausbaustufe ist erst abgeschlossen, wenn alle nicht expliz
 - WLAN/MQTT lokal und ohne Cloud stabil läuft.
 - Fahrmotor bei Kommunikationsverlust lokal sicher auf 0 fällt.
 - zwei motorisierte Drehregler manuell und vom Screen synchron bedienbar sind.
+- **die Hupe sowohl über Taster 8 / GPIO 13 am ESP Actor als auch über einen eigenen Hold-to-Honk-Button auf Screen 1 bedienbar ist.**
 - die Hupe lokal auf ESP Sensor/Aux erzeugt wird und bei Kommunikationsverlust automatisch verstummt.
+- **Screen 2 nicht nur Mittelwerte zeigt, sondern digitale Live-AN/AUS-Zeitspuren, aktuelle Zustandsdauern, Aktivierungs-/Blinkzähler und kontinuierliche Live-Kurven mit echter Zeitachse.**
+- bei Blinkern aktuelle Periodendauer/Frequenz und Zyklenzahl nachvollziehbar sind.
 - Screen 1 über das Logo eine vollständige Adminübersicht öffnet.
 - CPU, RAM, Speicher, Temperatur, Uptime, Netzwerk, Services, ESPs, Sensoren, Dials, Drive und Hupe diagnostizierbar sind.
 - Neustart/Shutdown nur über whitelisted, bestätigte und aktorsichere Aktionen möglich ist.
