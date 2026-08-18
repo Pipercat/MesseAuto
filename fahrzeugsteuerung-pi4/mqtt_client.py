@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import threading
 import time
@@ -51,6 +52,7 @@ class MqttClient:
         self._last_error: str | None = None
         self._client: "mqtt.Client | None" = None
         self._subscriptions: dict[str, list] = {}
+        self._seq = 0
 
         if self.enabled and mqtt is not None:
             self._client = mqtt.Client(client_id=self.client_id, clean_session=True)
@@ -111,6 +113,27 @@ class MqttClient:
             except Exception:
                 # a broken handler must never take down the MQTT network thread
                 pass
+
+    def publish_command(self, topic: str, payload: dict[str, Any]) -> bool:
+        """Publish a command with device/timestamp_ms/seq per MQTT.md.
+
+        Commands are QoS1, not retained: a lost command during a broker
+        outage must not be replayed later as a stale action.
+        """
+
+        if self._client is None or not self._connected:
+            return False
+        with self._lock:
+            self._seq += 1
+            seq = self._seq
+        body = {"device": "pi1", "timestamp_ms": int(time.time() * 1000), "seq": seq, **payload}
+        try:
+            self._client.publish(topic, json.dumps(body), qos=1, retain=False)
+            return True
+        except Exception as error:
+            with self._lock:
+                self._last_error = str(error)
+            return False
 
     def subscribe(self, topic: str, handler) -> None:  # noqa: ANN001
         with self._lock:

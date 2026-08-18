@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
 import threading
@@ -17,6 +18,7 @@ from gpio_controller import create_controller
 from mqtt_client import MqttClient
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+actor_state_logger = logging.getLogger("messeauto.actor_state")
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -31,12 +33,32 @@ heartbeat_interval = float(os.getenv("MESSEAUTO_HEARTBEAT_INTERVAL", "5"))
 heartbeat_stop = threading.Event()
 last_test_result: dict[str, Any] | None = None
 last_test_lock = threading.RLock()
+actor_mqtt_state: dict[str, Any] | None = None
+actor_mqtt_state_lock = threading.RLock()
+
+
+def handle_actor_state(topic: str, payload: bytes) -> None:
+    global actor_mqtt_state
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        actor_state_logger.warning("actor/state: ungueltiges JSON verworfen (%s)", error)
+        return
+    if not isinstance(data, dict) or "device" not in data or "timestamp_ms" not in data:
+        actor_state_logger.warning("actor/state: Pflichtfelder fehlen, verworfen: %r", data)
+        return
+    with actor_mqtt_state_lock:
+        actor_mqtt_state = data
+    actor_state_logger.info("actor/state: aktualisiert von device=%s", data.get("device"))
+
+
 esp32_actor.start()
 mqtt_client.start()
 mqtt_client.subscribe(
     "messecar/actor/event/button",
     lambda topic, payload: handle_button_event(payload, controller.toggle_output),
 )
+mqtt_client.subscribe("messecar/actor/state", handle_actor_state)
 atexit.register(controller.shutdown)
 atexit.register(esp32_actor.stop)
 atexit.register(mqtt_client.stop)
@@ -263,6 +285,9 @@ def api_set_output(output_id: str):
         return json_error("Feld 'active' fehlt")
     state = controller.set_output(output_id, bool(data["active"]))
     esp32_actor.send_outputs({output_id: state["outputs"][output_id]})
+    mqtt_client.publish_command(
+        "messecar/actor/command", {"function": output_id, "value": state["outputs"][output_id]}
+    )
     database_client.send_event("vehicle_output", {"output_id": output_id, "active": state["outputs"][output_id]})
     return jsonify({"ok": True, "state": combined_state()})
 
@@ -281,6 +306,10 @@ def api_set_outputs():
 
     state = controller.set_outputs(changes)
     esp32_actor.send_outputs({output_id: state["outputs"][output_id] for output_id in changes})
+    for output_id in changes:
+        mqtt_client.publish_command(
+            "messecar/actor/command", {"function": output_id, "value": state["outputs"][output_id]}
+        )
     database_client.send_event(
         "vehicle_outputs",
         {"outputs": {output_id: state["outputs"][output_id] for output_id in changes}},
