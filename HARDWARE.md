@@ -1,6 +1,23 @@
 # Hardware und Pinbelegung
 
-## ESP32 Aktorik
+## Sicherheitsregel: ESP32 ↔ Raspberry Pi
+
+Im aktuellen MesseCar-Aufbau dürfen ESP32 und Raspberry Pi 1 **nicht dauerhaft per USB miteinander verbunden werden**.
+
+Grund: Die USB-Verbindung verbindet die Masse des ESP32 mit der Masse des Raspberry Pi. In Verbindung mit der bestehenden Fahrzeug-/Relais-Schaltung entsteht dadurch ein unerwünschter Ground-Pfad bzw. Kurzschluss.
+
+Deshalb gilt aktuell:
+
+```text
+ESP32 Actor  ── WLAN/MQTT ──► Raspberry Pi 1
+ESP32 Sensor ── WLAN/MQTT ──► Raspberry Pi 1
+
+USB/Serial: standardmäßig deaktivierter Fallback
+```
+
+Der vorhandene Serial-Code wird bewusst nicht gelöscht. Er darf später wieder verwendet werden, wenn der Hardwareaufbau eine sichere galvanische Trennung ermöglicht, z. B. durch geeignete Relais-/Isolationshardware ohne problematische gemeinsame Masse.
+
+## ESP32 Actor
 
 ### Arduino-Bibliothek
 
@@ -32,7 +49,7 @@ Die Taster werden als aktiv LOW erwartet. Der bisherige Aufbau mit externen Pull
 
 Der Sketch ist aktuell für 75 NeoPixel konfiguriert.
 
-## ESP32 Sensorik
+## ESP32 Sensor
 
 ### Arduino-Bibliotheken
 
@@ -64,6 +81,16 @@ Diese drei Pins sind als anpassbare Standardwerte gesetzt, weil für den Sensor-
 
 Die GPIOs geben nur kurze Impulse aus. Ein erneuter Impuls schaltet die jeweilige externe Funktion wieder um.
 
-## Verbindung
+## Zielverbindung
 
-Beide ESP32 werden per USB mit Raspberry Pi 1 verbunden und senden JSON-Zeilen mit 115200 Baud. Pi 1 erkennt die Geräte über das Feld `device` automatisch.
+Raspberry Pi 1 soll ein lokales MesseCar-Netz bereitstellen oder darin betrieben werden. ESP32 Actor und ESP32 Sensor kommunizieren zukünftig per WLAN/MQTT mit Pi 1.
+
+Vorteile für den aktuellen Aufbau:
+
+- keine direkte elektrische Datenverbindung zwischen ESP und Pi
+- keine zusätzliche gemeinsame Masse durch USB
+- bidirektionale Kommunikation
+- mehrere ESP32 ohne zusätzliche Kabel
+- vollständig lokal ohne Cloud betreibbar
+
+Die exakte MQTT-Architektur und alle Arbeitsschritte sind in `TASKS.md` definiert.
