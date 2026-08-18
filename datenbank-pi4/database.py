@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+import random
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+
+
+RETENTION_DAYS = 7
 
 
 DB_PATH = Path("vehicle_tests.db")
@@ -123,7 +127,15 @@ def store_event(event_type: str, payload: dict[str, Any]) -> int:
         )
         event_id = int(cursor.lastrowid)
         route_event(connection, event_type, payload, timestamp, source_device)
+        if random.random() < 0.01:  # ~1 von 100 Events: DB-Groesse kontrollieren (MA-07-003)
+            prune_old_data(connection)
         return event_id
+
+
+def prune_old_data(connection: sqlite3.Connection, retention_days: int = RETENTION_DAYS) -> None:
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    for table in ("raw_events", "sensor_measurements", "seat_tests"):
+        connection.execute(f"DELETE FROM {table} WHERE timestamp < ?", (cutoff,))
 
 
 def route_event(connection: sqlite3.Connection, event_type: str, payload: dict[str, Any], timestamp: str, source_device: str | None) -> None:
