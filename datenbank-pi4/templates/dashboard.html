@@ -59,36 +59,16 @@
             <h2>LIVE ZUSTÄNDE</h2>
             <span id="live-updated">-</span>
           </div>
-          <canvas id="live-signals-chart" width="1040" height="260"></canvas>
-          <table class="live-counter-table" id="live-counter-table">
-            <thead><tr><th>Signal</th><th>Status</th><th>seit</th><th>AN gesamt</th><th>Aktivierungen</th></tr></thead>
-            <tbody></tbody>
-          </table>
+          <canvas id="live-signals-chart" width="1040" height="150"></canvas>
         </section>
 
         <section class="analytics-grid" aria-label="Grafiken">
-          <article class="panel chart-panel">
-            <div class="panel-head">
-              <h2>Funktionen</h2>
-              <span>Nutzung</span>
-            </div>
-            <canvas id="function-usage-chart" width="520" height="230"></canvas>
-          </article>
-
           <article class="panel chart-panel">
             <div class="panel-head">
               <h2>Befehlsverlauf</h2>
               <span>pro Minute</span>
             </div>
             <canvas id="vehicle-timeline-chart" width="520" height="230"></canvas>
-          </article>
-
-          <article class="panel chart-panel">
-            <div class="panel-head">
-              <h2>Motor-PWM</h2>
-              <span>0 bis 100 %</span>
-            </div>
-            <canvas id="motor-chart" width="520" height="230"></canvas>
           </article>
 
           <article class="panel chart-panel">
@@ -120,29 +100,7 @@
             </table>
           </article>
 
-          <article class="panel table-panel">
-            <div class="panel-head">
-              <h2>Fahrzeugaktionen</h2>
-              <span>Live</span>
-            </div>
-            <table class="events-table">
-              <thead><tr><th>Zeit</th><th>Typ</th><th>Funktion</th><th>Wert</th></tr></thead>
-              <tbody>
-                {% for event in data.analytics.latestVehicleEvents %}
-                  <tr>
-                    <td>{{ event.time }}</td>
-                    <td>{{ event.type }}</td>
-                    <td>{{ event.function }}</td>
-                    <td>{{ event.value }}</td>
-                  </tr>
-                {% else %}
-                  <tr><td colspan="4">Noch keine Fahrzeugaktion gespeichert</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </article>
-
-          <article class="panel table-panel">
+          <article class="panel table-panel table-panel-wide">
             <div class="panel-head">
               <h2>Testergebnisse</h2>
               <span>Historie</span>

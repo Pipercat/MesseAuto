@@ -329,7 +329,7 @@
   }
 
   function roundRect(ctx, x, y, width, height, radius) {
-    const r = Math.min(radius, width / 2, height / 2);
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
     ctx.beginPath();
     ctx.moveTo(x + r, y);
     ctx.arcTo(x + width, y, x + width, y + height, r);
@@ -340,21 +340,11 @@
   }
 
   function renderCharts() {
-    drawBars("function-usage-chart", dashboard.functionUsage);
     drawLine("vehicle-timeline-chart", dashboard.vehicleTimeline, {
       color: palette.yellow,
       fill: "rgba(255, 212, 74, 0.16)",
       label: "Befehle",
       empty: "Noch kein Befehlsverlauf",
-    });
-    drawLine("motor-chart", dashboard.motorHistory, {
-      color: palette.red,
-      fill: "rgba(255, 107, 107, 0.12)",
-      label: "Motor %",
-      empty: "Noch kein Motorverlauf",
-      fixedMin: 0,
-      fixedMax: 100,
-      ySuffix: "%",
     });
     drawVehicle("vehicle-chart", dashboard.motorHistory, dashboard.outputHistory);
   }
@@ -392,15 +382,16 @@
     const rowHeight = height / liveSignalOrder.length;
     const nowMs = data.now_ms;
     const windowMs = data.window_seconds * 1000;
-    const labelWidth = 150;
+    const labelWidth = 110;
+    const traceRight = width - 8;
 
     liveSignalOrder.forEach((signal, index) => {
       const rowTop = index * rowHeight;
       const rowMid = rowTop + rowHeight / 2;
       const info = data.signals[signal] || { active: false, transitions: [] };
 
-      ctx.fillStyle = palette.text;
-      ctx.font = labelFont;
+      ctx.fillStyle = info.active ? palette.green : palette.text;
+      ctx.font = `bold ${labelFont.match(/\d+px/)[0]} "Segoe UI", system-ui, sans-serif`;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillText(liveSignalLabels[signal] || signal, 4, rowMid);
@@ -416,47 +407,31 @@
       }
       points.push({ t: nowMs, active: running });
 
-      ctx.strokeStyle = palette.green;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
       const highY = rowTop + rowHeight * 0.25;
       const lowY = rowTop + rowHeight * 0.75;
-      const xFor = (t) => labelWidth + ((t - (nowMs - windowMs)) / windowMs) * (width - labelWidth - 4);
+      const xFor = (t) => labelWidth + ((t - (nowMs - windowMs)) / windowMs) * (traceRight - labelWidth);
+
+      ctx.lineWidth = 3.5;
+      ctx.lineJoin = "miter";
       let prevX = xFor(points[0].t);
       let prevY = points[0].active ? highY : lowY;
-      ctx.moveTo(prevX, prevY);
       for (let i = 1; i < points.length; i += 1) {
         const x = xFor(points[i - 1].t);
         const y = points[i].active ? highY : lowY;
+        ctx.strokeStyle = prevY === highY ? palette.green : palette.muted;
+        ctx.beginPath();
+        ctx.moveTo(prevX, prevY);
         ctx.lineTo(x, prevY);
         ctx.lineTo(x, y);
+        ctx.stroke();
+        prevX = x;
         prevY = y;
       }
+      ctx.strokeStyle = prevY === highY ? palette.green : palette.muted;
+      ctx.beginPath();
+      ctx.moveTo(prevX, prevY);
       ctx.lineTo(xFor(nowMs), prevY);
       ctx.stroke();
-    });
-  }
-
-  function updateLiveCounters(data) {
-    const tbody = document.querySelector("#live-counter-table tbody");
-    if (!tbody) {
-      return;
-    }
-    tbody.innerHTML = "";
-    liveSignalOrder.forEach((signal) => {
-      const info = data.signals[signal];
-      if (!info) {
-        return;
-      }
-      const row = document.createElement("tr");
-      row.innerHTML = `
-        <td>${liveSignalLabels[signal]}</td>
-        <td>${info.active ? "AN" : "AUS"}</td>
-        <td>${formatDurationMs(info.duration_ms)}</td>
-        <td>${formatDurationMs(info.on_time_ms_total)}</td>
-        <td>${info.activation_count_total}</td>
-      `;
-      tbody.appendChild(row);
     });
     const updatedLabel = document.getElementById("live-updated");
     if (updatedLabel) {
@@ -470,15 +445,22 @@
       const payload = await response.json();
       if (payload.ok) {
         drawLiveSignals(payload.data);
-        updateLiveCounters(payload.data);
       }
     } catch (error) {
       // naechster Poll versucht es erneut
     }
   }
 
-  window.addEventListener("resize", renderCharts);
-  renderCharts();
+  function safeRenderCharts() {
+    try {
+      renderCharts();
+    } catch (error) {
+      console.error("renderCharts failed", error);
+    }
+  }
+
+  window.addEventListener("resize", safeRenderCharts);
+  safeRenderCharts();
   pollLiveSignals();
   window.setInterval(pollLiveSignals, 1000);
 })();
