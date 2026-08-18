@@ -16,6 +16,7 @@ from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
 from mqtt_client import MqttClient
+from mqtt_status_store import MqttStatusStore
 from sensor_telemetry import handle_sensor_telemetry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -38,6 +39,9 @@ actor_mqtt_state: dict[str, Any] | None = None
 actor_mqtt_state_lock = threading.RLock()
 sensor_state: dict[str, Any] = {}
 sensor_state_lock = threading.RLock()
+actor_status_store = MqttStatusStore("actor/status")
+sensor_status_store = MqttStatusStore("sensor/status")
+MQTT_FRESH_WINDOW_MS = 30_000
 
 
 def handle_actor_state(topic: str, payload: bytes) -> None:
@@ -55,6 +59,16 @@ def handle_actor_state(topic: str, payload: bytes) -> None:
     actor_state_logger.info("actor/state: aktualisiert von device=%s", data.get("device"))
 
 
+def esp_mqtt_transport(status_store: MqttStatusStore, extra_last_seen_ms: int | None) -> dict[str, Any]:
+    status = status_store.snapshot()
+    candidates = [ts for ts in (status["last_seen"], extra_last_seen_ms) if ts is not None]
+    last_seen = max(candidates) if candidates else None
+    now_ms = int(time.time() * 1000)
+    fresh = last_seen is not None and (now_ms - last_seen) <= MQTT_FRESH_WINDOW_MS
+    online = fresh and status["status"] == "online"
+    return {"online": online, "status": status["status"], "last_seen": last_seen, "fresh": fresh}
+
+
 esp32_actor.start()
 mqtt_client.start()
 mqtt_client.subscribe(
@@ -66,6 +80,8 @@ mqtt_client.subscribe(
     "messecar/sensor/telemetry",
     lambda topic, payload: handle_sensor_telemetry(payload, sensor_state, sensor_state_lock),
 )
+mqtt_client.subscribe("messecar/actor/status", actor_status_store.handler)
+mqtt_client.subscribe("messecar/sensor/status", sensor_status_store.handler)
 atexit.register(controller.shutdown)
 atexit.register(esp32_actor.stop)
 atexit.register(mqtt_client.stop)
@@ -214,7 +230,55 @@ def api_metrics():
 
 @app.get("/api/esp32/actor")
 def api_esp32_actor():
-    return jsonify({"ok": True, "esp32Actor": esp32_actor.snapshot()})
+    serial_snapshot = esp32_actor.snapshot()
+    with actor_mqtt_state_lock:
+        mqtt_state = dict(actor_mqtt_state) if actor_mqtt_state else None
+    mqtt_last_seen = mqtt_state["timestamp_ms"] if mqtt_state and "timestamp_ms" in mqtt_state else None
+    mqtt = esp_mqtt_transport(actor_status_store, mqtt_last_seen)
+    serial_connected = bool(serial_snapshot.get("connected") or serial_snapshot.get("serialActive"))
+
+    if mqtt["online"]:
+        transport, connected, last_seen = "mqtt", True, mqtt["last_seen"]
+    elif serial_connected:
+        transport, connected, last_seen = "serial", True, None
+    else:
+        transport, connected, last_seen = "offline", False, mqtt["last_seen"]
+
+    return jsonify(
+        {
+            "ok": True,
+            "esp32Actor": serial_snapshot,
+            "transport": transport,
+            "connected": connected,
+            "last_seen": last_seen,
+            "mqtt": {**mqtt, "state": mqtt_state},
+            "error": None if connected else (mqtt["status"] or "no_data"),
+        }
+    )
+
+
+@app.get("/api/esp32/sensor")
+def api_esp32_sensor():
+    with sensor_state_lock:
+        telemetry = dict(sensor_state)
+    telemetry_last_seen = max(
+        (field["last_seen"] for field in telemetry.values() if field.get("last_seen") is not None),
+        default=None,
+    )
+    mqtt = esp_mqtt_transport(sensor_status_store, telemetry_last_seen)
+    transport = "mqtt" if mqtt["online"] else "offline"
+
+    return jsonify(
+        {
+            "ok": True,
+            "transport": transport,
+            "connected": mqtt["online"],
+            "last_seen": mqtt["last_seen"],
+            "mqtt": mqtt,
+            "telemetry": telemetry,
+            "error": None if mqtt["online"] else (mqtt["status"] or "no_data"),
+        }
+    )
 
 
 @app.get("/api/sensors")
