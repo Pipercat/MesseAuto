@@ -11,7 +11,7 @@ from typing import Any
 
 from flask import Flask, jsonify, request, send_from_directory
 
-from actor_button_mapping import handle_button_event
+from actor_button_mapping import BUTTON_OUTPUT_MAP, handle_button_event
 from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
@@ -410,6 +410,8 @@ def api_set_motor():
 def api_reset():
     controller.reset()
     esp32_actor.reset()
+    for output_id in BUTTON_OUTPUT_MAP.values():
+        mqtt_client.publish_command("messecar/actor/command", {"function": output_id, "value": False})
     database_client.send_event("vehicle_reset", {})
     return jsonify({"ok": True, "state": combined_state()})
 
