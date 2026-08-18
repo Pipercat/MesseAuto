@@ -16,6 +16,7 @@ from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
 from mqtt_client import MqttClient
+from sensor_telemetry import handle_sensor_telemetry
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 actor_state_logger = logging.getLogger("messeauto.actor_state")
@@ -35,6 +36,8 @@ last_test_result: dict[str, Any] | None = None
 last_test_lock = threading.RLock()
 actor_mqtt_state: dict[str, Any] | None = None
 actor_mqtt_state_lock = threading.RLock()
+sensor_state: dict[str, Any] = {}
+sensor_state_lock = threading.RLock()
 
 
 def handle_actor_state(topic: str, payload: bytes) -> None:
@@ -59,6 +62,10 @@ mqtt_client.subscribe(
     lambda topic, payload: handle_button_event(payload, controller.toggle_output),
 )
 mqtt_client.subscribe("messecar/actor/state", handle_actor_state)
+mqtt_client.subscribe(
+    "messecar/sensor/telemetry",
+    lambda topic, payload: handle_sensor_telemetry(payload, sensor_state, sensor_state_lock),
+)
 atexit.register(controller.shutdown)
 atexit.register(esp32_actor.stop)
 atexit.register(mqtt_client.stop)
@@ -208,6 +215,13 @@ def api_metrics():
 @app.get("/api/esp32/actor")
 def api_esp32_actor():
     return jsonify({"ok": True, "esp32Actor": esp32_actor.snapshot()})
+
+
+@app.get("/api/sensors")
+def api_sensors():
+    with sensor_state_lock:
+        snapshot = dict(sensor_state)
+    return jsonify({"ok": True, "sensors": snapshot})
 
 
 @app.post("/api/esp32/actor/probe")
