@@ -12,12 +12,14 @@ from typing import Any
 from flask import Flask, jsonify, request, send_from_directory
 
 from actor_button_mapping import BUTTON_OUTPUT_MAP, handle_button_event
+from admin_actions import RESTARTABLE_SERVICES, reboot_pi1, restart_service, shutdown_pi1
 from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
 from mqtt_client import MqttClient
 from mqtt_status_store import MqttStatusStore
 from sensor_telemetry import handle_sensor_telemetry
+from system_metrics import service_status, system_metrics
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
 actor_state_logger = logging.getLogger("messeauto.actor_state")
@@ -433,6 +435,73 @@ def api_reset():
         mqtt_client.publish_command("messecar/actor/command", {"function": output_id, "value": False})
     database_client.send_event("vehicle_reset", {})
     return jsonify({"ok": True, "state": combined_state()})
+
+
+def safe_all_off() -> None:
+    controller.reset()
+    for output_id in BUTTON_OUTPUT_MAP.values():
+        mqtt_client.publish_command("messecar/actor/command", {"function": output_id, "value": False})
+
+
+@app.get("/api/admin/metrics")
+def api_admin_metrics():
+    return jsonify({"ok": True, "metrics": system_metrics()})
+
+
+@app.get("/api/admin/services")
+def api_admin_services():
+    units = ["messeauto.service", "mosquitto.service", "messecar-ap.service", "messecar-hostapd.service"]
+    return jsonify({"ok": True, "services": service_status(units), "restartable": list(RESTARTABLE_SERVICES)})
+
+
+@app.post("/api/admin/service/restart")
+def api_admin_service_restart():
+    data = request_data()
+    unit_name = str(data.get("service") or "")
+    result = restart_service(unit_name)
+    return jsonify(result), (200 if result["ok"] else 400)
+
+
+@app.post("/api/admin/reboot")
+def api_admin_reboot():
+    result = reboot_pi1(safe_all_off)
+    return jsonify(result), (200 if result["ok"] else 400)
+
+
+@app.post("/api/admin/shutdown")
+def api_admin_shutdown():
+    result = shutdown_pi1(safe_all_off)
+    return jsonify(result), (200 if result["ok"] else 400)
+
+
+@app.get("/api/admin/devices")
+def api_admin_devices():
+    serial_snapshot = esp32_actor.snapshot()
+    actor = actor_transport_status(serial_snapshot)
+    with sensor_state_lock:
+        telemetry = dict(sensor_state)
+    telemetry_last_seen = max(
+        (field["last_seen"] for field in telemetry.values() if field.get("last_seen") is not None),
+        default=None,
+    )
+    sensor_mqtt = esp_mqtt_transport(sensor_status_store, telemetry_last_seen)
+
+    pi2_reachable = bool(database_client.snapshot().get("lastOk"))
+
+    devices = {
+        "pi1": {"status": "online", "last_seen": int(time.time() * 1000)},
+        "pi2": {"status": "online" if pi2_reachable else "offline", "last_seen": None},
+        "esp32_actor": {"status": actor["status"], "transport": actor["transport"], "last_seen": actor["last_seen"]},
+        "esp32_sensor_aux": {
+            "status": "connected" if sensor_mqtt["online"] else "offline",
+            "transport": "mqtt" if sensor_mqtt["online"] else "offline",
+            "last_seen": sensor_mqtt["last_seen"],
+        },
+    }
+    all_online = all(d["status"] in ("online", "connected") for d in devices.values())
+    core_online = devices["pi1"]["status"] == "online" and devices["pi2"]["status"] == "online"
+    readiness = "BEREIT" if all_online else ("EINGESCHRÄNKT" if core_online else "NICHT BEREIT")
+    return jsonify({"ok": True, "devices": devices, "readiness": readiness})
 
 
 @app.post("/api/database/ping")

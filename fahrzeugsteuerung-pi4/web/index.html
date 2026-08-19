@@ -72,62 +72,79 @@
                   <strong id="pi-relay-mode">--</strong>
                 </div>
                 <div>
-                  <span>Impulsdauer</span>
-                  <strong id="pi-pulse-duration">--</strong>
-                </div>
-                <div>
-                  <span>Motor-PWM</span>
-                  <strong id="pi-motor-pin">GPIO 22</strong>
-                </div>
-                <div>
                   <span>ESP-Betrieb</span>
                   <strong id="pi-esp-status">--</strong>
-                </div>
-                <div>
-                  <span>ESP-Flash</span>
-                  <strong id="pi-esp-port">--</strong>
-                </div>
-                <div>
-                  <span>Pi-Serial</span>
-                  <strong id="pi-esp-messages">0</strong>
-                </div>
-                <div>
-                  <span>Runtime</span>
-                  <strong id="pi-esp-last-seen">--</strong>
-                </div>
-                <div>
-                  <span>Serial-Fehler</span>
-                  <strong id="pi-esp-unknown">0</strong>
-                </div>
-                <div>
-                  <span>Aktorpfad</span>
-                  <strong id="pi-esp-raw">--</strong>
                 </div>
                 <div>
                   <span>Datenbank-Pi</span>
                   <strong id="pi-db-status">--</strong>
                 </div>
-                <div>
-                  <span>DB-Ziel</span>
-                  <strong id="pi-db-url">--</strong>
-                </div>
               </div>
+              <p class="pi-status-hint">Serial-/Flash-Diagnose (Legacy-Fallback) und ESP-/Pi-2-Verbindungsdetails stehen jetzt in der Adminübersicht unten.</p>
               <div class="pi-action-row" aria-label="Pi Aktionen">
-                <button class="pi-action-button" type="button" data-pi-action="refresh">Aktualisieren</button>
-                <button class="pi-action-button pi-action-danger" type="button" data-pi-action="reset">Alles zurücksetzen</button>
+                <button class="pi-action-button" type="button" data-pi-action="reset">Alle Fahrzeugfunktionen ausschalten</button>
               </div>
               <p id="pi-action-status" class="pi-action-status">Bereit</p>
             </section>
+          </div>
 
-            <section class="pi-map-panel" aria-label="Relais und Pins">
+          <div class="admin-layout">
+            <section class="admin-panel" aria-label="Systemstatus Übersicht">
               <div class="section-heading">
-                <h2>Relais / Ausgänge</h2>
-                <span id="pi-output-summary">0 aktiv</span>
+                <h2>Adminübersicht</h2>
+                <span id="admin-readiness" class="admin-readiness">--</span>
               </div>
-              <div id="pi-output-map" class="pi-output-map"></div>
+              <div id="admin-device-cards" class="admin-device-cards"></div>
+            </section>
+
+            <section class="admin-panel" aria-label="Pi Metrics">
+              <div class="section-heading">
+                <h2>Pi 1 (dieser Pi)</h2>
+                <span id="admin-pi1-uptime">--</span>
+              </div>
+              <div id="admin-pi1-metrics" class="admin-metrics-grid"></div>
+            </section>
+
+            <section class="admin-panel" aria-label="Pi 2 Metrics">
+              <div class="section-heading">
+                <h2>Pi 2 (Datenbank)</h2>
+                <span id="admin-pi2-uptime">--</span>
+              </div>
+              <div id="admin-pi2-metrics" class="admin-metrics-grid"></div>
+            </section>
+
+            <section class="admin-panel" aria-label="Dienste">
+              <div class="section-heading">
+                <h2>Dienste</h2>
+              </div>
+              <div id="admin-services" class="admin-services-list"></div>
+            </section>
+
+            <section class="admin-panel admin-panel-danger" aria-label="Neustart und Herunterfahren">
+              <div class="section-heading">
+                <h2>Neustart / Herunterfahren</h2>
+              </div>
+              <div class="admin-action-row">
+                <button class="pi-action-button" type="button" data-admin-power="pi1-reboot">Pi 1 neu starten</button>
+                <button class="pi-action-button pi-action-danger" type="button" data-admin-power="pi1-shutdown">Pi 1 herunterfahren</button>
+              </div>
+              <div class="admin-action-row">
+                <button class="pi-action-button" type="button" data-admin-power="pi2-reboot">Pi 2 neu starten</button>
+                <button class="pi-action-button pi-action-danger" type="button" data-admin-power="pi2-shutdown">Pi 2 herunterfahren</button>
+              </div>
             </section>
           </div>
         </section>
+
+        <div id="admin-confirm-overlay" class="admin-confirm-overlay" hidden>
+          <div class="admin-confirm-dialog" role="alertdialog" aria-modal="true">
+            <p id="admin-confirm-text">Aktion bestätigen?</p>
+            <div class="admin-confirm-buttons">
+              <button id="admin-confirm-cancel" type="button" class="pi-action-button">Abbrechen</button>
+              <button id="admin-confirm-ok" type="button" class="pi-action-button pi-action-danger">Bestätigen</button>
+            </div>
+          </div>
+        </div>
 
         <section id="vehicle-screen" class="screen vehicle-screen" aria-labelledby="vehicle-title">
           <div class="screen-title">

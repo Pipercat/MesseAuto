@@ -933,6 +933,12 @@ h2 {
   overflow-wrap: anywhere;
 }
 
+.pi-status-hint {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+
 .pi-action-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -981,6 +987,153 @@ h2 {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
+}
+
+/* ---------- Adminübersicht (MA-12) ---------- */
+
+.admin-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-panel {
+  padding: 14px;
+  border: 2px solid rgba(15, 23, 42, 0.14);
+  border-radius: var(--radius);
+  background: #ffffff;
+}
+
+.admin-panel-danger {
+  grid-column: 1 / -1;
+  border-color: rgba(214, 40, 40, 0.4);
+}
+
+.admin-readiness {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-weight: 900;
+  font-size: 1.2rem;
+}
+
+.admin-readiness.is-ready {
+  background: rgba(0, 159, 93, 0.18);
+  color: #064e3b;
+}
+
+.admin-readiness.is-limited {
+  background: rgba(255, 212, 0, 0.28);
+  color: #7a5b00;
+}
+
+.admin-readiness.is-not-ready {
+  background: rgba(214, 40, 40, 0.18);
+  color: #7f1d1d;
+}
+
+.admin-device-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.admin-device-card {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  border: 2px solid rgba(15, 23, 42, 0.14);
+  background: rgba(15, 23, 42, 0.03);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-device-card .admin-device-name {
+  display: block;
+  font-size: 1.1rem;
+  color: var(--muted);
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.admin-device-card .admin-device-status {
+  font-weight: 950;
+  font-size: 1.3rem;
+}
+
+.admin-device-card.is-online .admin-device-status { color: #064e3b; }
+.admin-device-card.is-offline .admin-device-status { color: #7f1d1d; }
+.admin-device-card.is-stale .admin-device-status { color: #7a5b00; }
+
+.admin-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  font-size: 1.1rem;
+}
+
+.admin-metrics-grid div {
+  padding: 6px 8px;
+}
+
+.admin-metrics-grid span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.admin-metrics-grid strong {
+  font-size: 1.25rem;
+}
+
+.admin-services-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-service-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border: 2px solid rgba(15, 23, 42, 0.12);
+  border-radius: var(--radius);
+}
+
+.admin-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.admin-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(7, 20, 33, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.admin-confirm-overlay[hidden] {
+  display: none;
+}
+
+.admin-confirm-dialog {
+  background: #ffffff;
+  border-radius: var(--radius);
+  padding: 24px;
+  max-width: 420px;
+  box-shadow: var(--shadow);
+}
+
+.admin-confirm-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
 }
 
 .pi-output-item {

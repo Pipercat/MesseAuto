@@ -22,18 +22,8 @@ const chartContext = chart.getContext("2d");
 const piMode = document.getElementById("pi-mode");
 const piGpioMode = document.getElementById("pi-gpio-mode");
 const piRelayMode = document.getElementById("pi-relay-mode");
-const piPulseDuration = document.getElementById("pi-pulse-duration");
-const piMotorPin = document.getElementById("pi-motor-pin");
 const piEspStatus = document.getElementById("pi-esp-status");
-const piEspPort = document.getElementById("pi-esp-port");
-const piEspMessages = document.getElementById("pi-esp-messages");
-const piEspLastSeen = document.getElementById("pi-esp-last-seen");
-const piEspUnknown = document.getElementById("pi-esp-unknown");
-const piEspRaw = document.getElementById("pi-esp-raw");
 const piDbStatus = document.getElementById("pi-db-status");
-const piDbUrl = document.getElementById("pi-db-url");
-const piOutputMap = document.getElementById("pi-output-map");
-const piOutputSummary = document.getElementById("pi-output-summary");
 const piActionStatus = document.getElementById("pi-action-status");
 
 const state = {
@@ -159,6 +149,7 @@ async function loadInitialState() {
   drawGraph();
   routeTo(requestedInitialScreen());
   window.setInterval(refreshRuntimeState, 1000);
+  window.setInterval(refreshAdminOverview, 5000);
 }
 
 function requestedInitialScreen() {
@@ -224,8 +215,177 @@ function routeTo(screenName) {
 
   if (screenName === "pi") {
     updatePiScreen();
+    refreshAdminOverview();
   }
 }
+
+const READINESS_CLASS = { BEREIT: "is-ready", EINGESCHRÄNKT: "is-limited", "NICHT BEREIT": "is-not-ready" };
+const DEVICE_LABELS = { pi1: "Pi 1", pi2: "Pi 2", esp32_actor: "ESP Actor", esp32_sensor_aux: "ESP Sensor/Aux" };
+
+function formatUptime(seconds) {
+  if (!Number.isFinite(seconds)) {
+    return "--";
+  }
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes)) {
+    return "--";
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
+}
+
+function renderMetrics(containerId, metrics) {
+  const container = document.getElementById(containerId);
+  if (!container || !metrics) {
+    return;
+  }
+  container.innerHTML = `
+    <div><span>CPU</span><strong>${metrics.cpu.percent.toFixed(0)}%</strong></div>
+    <div><span>Temp</span><strong>${metrics.cpu.temperature_c !== null ? metrics.cpu.temperature_c.toFixed(1) + "°C" : "--"}</strong></div>
+    <div><span>RAM</span><strong>${metrics.memory.percent.toFixed(0)}%</strong></div>
+    <div><span>Disk</span><strong>${metrics.disk.percent.toFixed(0)}%</strong></div>
+    <div><span>Swap</span><strong>${metrics.swap.percent.toFixed(0)}%</strong></div>
+    ${metrics.sqlite_db_bytes !== undefined ? `<div><span>SQLite</span><strong>${formatBytes(metrics.sqlite_db_bytes)}</strong></div>` : ""}
+  `;
+}
+
+async function refreshAdminOverview() {
+  if (state.screen !== "pi") {
+    return;
+  }
+  try {
+    const devicesPayload = await apiRequest("/api/admin/devices");
+    const readinessEl = document.getElementById("admin-readiness");
+    if (readinessEl) {
+      readinessEl.textContent = devicesPayload.readiness;
+      readinessEl.className = `admin-readiness ${READINESS_CLASS[devicesPayload.readiness] || ""}`;
+    }
+    const cardsContainer = document.getElementById("admin-device-cards");
+    if (cardsContainer) {
+      cardsContainer.innerHTML = Object.entries(devicesPayload.devices)
+        .map(([key, info]) => {
+          const online = info.status === "online" || info.status === "connected";
+          return `
+            <div class="admin-device-card ${online ? "is-online" : "is-offline"}">
+              <span class="admin-device-name">${DEVICE_LABELS[key] || key}</span>
+              <span class="admin-device-status">${online ? "ONLINE" : "OFFLINE"}</span>
+            </div>
+          `;
+        })
+        .join("");
+    }
+  } catch (error) {
+    // naechster Poll versucht es erneut
+  }
+
+  try {
+    const metricsPayload = await apiRequest("/api/admin/metrics");
+    renderMetrics("admin-pi1-metrics", metricsPayload.metrics);
+    const uptimeEl = document.getElementById("admin-pi1-uptime");
+    if (uptimeEl) {
+      uptimeEl.textContent = `Uptime ${formatUptime(metricsPayload.metrics.uptime_s)}`;
+    }
+  } catch (error) {
+    // Pi1-Metriken lokal, sollten immer erreichbar sein
+  }
+
+  try {
+    const pi2Response = await fetch("http://10.42.0.12:9000/api/admin/metrics");
+    const pi2Payload = await pi2Response.json();
+    if (pi2Payload.ok) {
+      renderMetrics("admin-pi2-metrics", pi2Payload.metrics);
+      const uptimeEl = document.getElementById("admin-pi2-uptime");
+      if (uptimeEl) {
+        uptimeEl.textContent = `Uptime ${formatUptime(pi2Payload.metrics.uptime_s)}`;
+      }
+    }
+  } catch (error) {
+    const uptimeEl = document.getElementById("admin-pi2-uptime");
+    if (uptimeEl) {
+      uptimeEl.textContent = "nicht erreichbar";
+    }
+  }
+
+  try {
+    const servicesPayload = await apiRequest("/api/admin/services");
+    const container = document.getElementById("admin-services");
+    if (container) {
+      container.innerHTML = Object.entries(servicesPayload.services)
+        .map(([unit, status]) => {
+          const canRestart = servicesPayload.restartable.includes(unit);
+          return `
+            <div class="admin-service-row">
+              <span>${unit} — ${status}</span>
+              ${canRestart ? `<button class="pi-action-button" type="button" data-admin-restart="${unit}">Neu starten</button>` : ""}
+            </div>
+          `;
+        })
+        .join("");
+    }
+  } catch (error) {
+    // naechster Poll versucht es erneut
+  }
+}
+
+function showConfirmDialog(text) {
+  return new Promise((resolve) => {
+    const overlay = document.getElementById("admin-confirm-overlay");
+    const textEl = document.getElementById("admin-confirm-text");
+    const okBtn = document.getElementById("admin-confirm-ok");
+    const cancelBtn = document.getElementById("admin-confirm-cancel");
+    textEl.textContent = text;
+    overlay.hidden = false;
+
+    const cleanup = (result) => {
+      overlay.hidden = true;
+      okBtn.removeEventListener("click", onOk);
+      cancelBtn.removeEventListener("click", onCancel);
+      resolve(result);
+    };
+    const onOk = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    okBtn.addEventListener("click", onOk);
+    cancelBtn.addEventListener("click", onCancel);
+  });
+}
+
+document.addEventListener("click", async (event) => {
+  const restartButton = event.target.closest("[data-admin-restart]");
+  if (restartButton) {
+    const unit = restartButton.dataset.adminRestart;
+    const confirmed = await showConfirmDialog(`Dienst "${unit}" auf diesem Pi neu starten?`);
+    if (!confirmed) {
+      return;
+    }
+    await fetch("/api/admin/service/restart", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ service: unit }),
+    }).catch(() => {});
+    refreshAdminOverview();
+  }
+
+  const powerButton = event.target.closest("[data-admin-power]");
+  if (powerButton) {
+    const action = powerButton.dataset.adminPower;
+    const labels = {
+      "pi1-reboot": ["Pi 1", "/api/admin/reboot", "neu starten"],
+      "pi1-shutdown": ["Pi 1", "/api/admin/shutdown", "herunterfahren"],
+      "pi2-reboot": ["Pi 2", "http://10.42.0.12:9000/api/admin/reboot", "neu starten"],
+      "pi2-shutdown": ["Pi 2", "http://10.42.0.12:9000/api/admin/shutdown", "herunterfahren"],
+    };
+    const [target, path, verb] = labels[action];
+    const confirmed = await showConfirmDialog(`${target} wirklich ${verb}? Das Fahrzeug wird vorher sicher ausgeschaltet.`);
+    if (!confirmed) {
+      return;
+    }
+    await fetch(path, { method: "POST" }).catch(() => {});
+  }
+});
 
 function renderControls() {
   const containers = {
@@ -392,36 +552,21 @@ function updateVehicleUi() {
 }
 
 function updatePiScreen() {
-  if (!piMode || !piOutputMap) {
+  if (!piMode) {
     return;
   }
 
-  const digitalPins = (state.pins.length ? state.pins : fallbackPins).filter((pin) => pin.kind === "digital");
-  const effectiveOutputs = state.effectiveOutputs || state.outputs || {};
-  const activeCount = Object.values(effectiveOutputs).filter(Boolean).length;
   const relayMode = state.settings.digitalGpioMode === "pulse_only" ? "Impulsbetrieb" : "Dauerpegel";
-  const pulseSeconds = Number(state.settings.pulseDuration);
-  const motorPin = (state.pins || []).find((pin) => pin.id === "motor");
   const esp = state.esp32Actor || {};
   const databasePi = state.databasePi || {};
-  const displayedAge = esp.lastSeenAgeSeconds ?? esp.lastRawAgeSeconds;
-  const hasAge = displayedAge !== null && displayedAge !== undefined;
-  const age = hasAge ? Number(displayedAge) : NaN;
   const candidatePort = Array.isArray(esp.candidatePorts) ? esp.candidatePorts[0] : "";
 
   piMode.textContent = state.hardwareMode === "gpio" ? "GPIO aktiv" : state.hardwareMode;
   piGpioMode.textContent = state.hardwareMode === "gpio" ? "echte Hardware" : "Simulation";
   piRelayMode.textContent = relayMode;
-  piPulseDuration.textContent = Number.isFinite(pulseSeconds) ? `${Math.round(pulseSeconds * 1000)} ms` : "--";
-  piMotorPin.textContent = motorPin ? `GPIO ${motorPin.gpio}` : "GPIO 22";
 
   if (esp.enabled === false || esp.runtimeMode === "standalone_pc_flash") {
     piEspStatus.textContent = "Standalone";
-    piEspPort.textContent = "PC-Flash";
-    piEspMessages.textContent = "aus";
-    piEspLastSeen.textContent = "nicht am Pi";
-    piEspUnknown.textContent = "0";
-    piEspRaw.textContent = "Pi-GPIO";
   } else {
     piEspStatus.textContent = esp.connected
     ? esp.relayMode === "pulse_only" || esp.protocol === "relay_pulse_serial"
@@ -434,27 +579,8 @@ function updatePiScreen() {
       : candidatePort
           ? "USB erkannt"
           : "nicht verbunden";
-    piEspPort.textContent = shortPortName(esp.port || candidatePort || "--");
-    piEspMessages.textContent = String(esp.messageCount || 0);
-    piEspLastSeen.textContent = Number.isFinite(age) ? `${age.toFixed(1).replace(".", ",")} s` : "--";
-    piEspUnknown.textContent = String((esp.unknownMessageCount || 0) + (esp.decodeErrorCount || 0));
-    piEspRaw.textContent = esp.lastRawLine ? "Status empfangen" : "--";
   }
   piDbStatus.textContent = databasePi.enabled ? databaseStatusLabel(databasePi) : "nicht eingerichtet";
-  piDbUrl.textContent = databasePi.url ? databasePi.url.replace("http://", "") : "--";
-  piOutputSummary.textContent = `${activeCount} aktiv`;
-
-  piOutputMap.innerHTML = "";
-  digitalPins.forEach((pin) => {
-    const item = document.createElement("div");
-    item.className = "pi-output-item";
-    item.classList.toggle("is-active", Boolean(effectiveOutputs[pin.id]));
-    item.innerHTML = `
-      <span>${shortLabels[pin.id] || pin.label}</span>
-      <strong>GPIO ${pin.gpio}</strong>
-    `;
-    piOutputMap.appendChild(item);
-  });
 }
 
 function showPiActionStatus(message, type = "") {
@@ -463,17 +589,6 @@ function showPiActionStatus(message, type = "") {
   }
   piActionStatus.className = `pi-action-status${type ? ` is-${type}` : ""}`;
   piActionStatus.textContent = message;
-}
-
-function shortPortName(port) {
-  if (!port || port === "--") {
-    return "--";
-  }
-  if (String(port).includes("CP2102") || String(port).includes("Silicon_Labs")) {
-    return "CP2102 USB";
-  }
-  const parts = String(port).split("/");
-  return parts[parts.length - 1] || String(port);
 }
 
 function databaseStatusLabel(databasePi) {
