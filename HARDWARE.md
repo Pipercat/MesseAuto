@@ -34,7 +34,7 @@ Der vorhandene Serial-Code wird bewusst nicht gelöscht. Er darf später wieder 
 | 5 | 14 | Blinker rechts |
 | 6 | 27 | Warnblinker |
 | 7 | 34 | Lüfter |
-| 8 | 13 | Reserve |
+| 8 | 13 | **Hupe** (physischer Taster, siehe MA-11-006A) |
 | 9 | 26 | Reserve |
 | 10 | 32 | Reserve |
 
@@ -46,8 +46,13 @@ Die Taster werden als aktiv LOW erwartet. Der bisherige Aufbau mit externen Pull
 |---|---:|
 | Lüfter | 22 |
 | WS2812/NeoPixel | 0 |
+| Hupen-Trigger → ESP Sensor/Aux GPIO 13 | 21 |
 
 Der Sketch ist aktuell für 75 NeoPixel konfiguriert.
+
+### Direkte Hupen-Leitung Actor → Sensor/Aux (real verkabelt)
+
+Zusätzlich zum MQTT-Pfad (M11) gibt es eine **direkte Hardware-Verbindung** zwischen den beiden ESP32: Actor-GPIO 21 ist fest mit Sensor/Aux-GPIO 13 verdrahtet. Wird der Hupentaster (Actor-GPIO 13) gedrückt, soll der Actor GPIO 21 entsprechend treiben; der Sensor/Aux liest das an seinem GPIO 13 als lokalen Hupen-Trigger — unabhängig von WLAN/MQTT-Latenz. Diese Direktleitung ist ein zusätzlicher, schneller Pfad neben dem MQTT-Hupenbefehl (`messecar/horn/command`) und dem Screen-1-Button; noch nicht in Firmware umgesetzt (betrifft MA-11-006A, MA-11-007A, MA-11-010, MA-11-015).
 
 ## ESP32 Sensor/Aux
 
@@ -58,6 +63,9 @@ Der Sketch ist aktuell für 75 NeoPixel konfiguriert.
 | Temperatur (analog LM35/TMP36) | GPIO 34 (ADC) |
 | Ultraschall Trigger | GPIO 18 |
 | Ultraschall Echo | GPIO 19 |
+| Hupen-Trigger (Direktleitung von Actor-GPIO 21) | GPIO 13 |
+
+Keine Pin-Kollision zwischen Sensorik (34/18/19), Hupen-Trigger (13) und MAX98357A-I2S (25/26/22).
 
 Diese drei Pins sind als anpassbare Standardwerte gesetzt, weil für den Sensor-ESP32 bisher keine endgültige Pinbelegung dokumentiert war. Temperatur wird aktuell analog (LM35/TMP36 an ADC) ausgelesen, **nicht** per DS18B20/OneWire.
 
