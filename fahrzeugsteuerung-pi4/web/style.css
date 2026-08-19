@@ -994,15 +994,25 @@ h2 {
 .admin-layout {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 16px;
+  gap: 8px;
+  margin-top: 10px;
 }
 
 .admin-panel {
-  padding: 14px;
+  padding: 10px;
   border: 2px solid rgba(15, 23, 42, 0.14);
   border-radius: var(--radius);
   background: #ffffff;
+}
+
+.admin-panel .pi-action-button {
+  min-height: 40px;
+  padding: 0 10px;
+  font-size: 1.05rem;
+}
+
+.admin-panel .section-heading {
+  margin-bottom: 6px;
 }
 
 .admin-panel-danger {
@@ -1086,25 +1096,33 @@ h2 {
 }
 
 .admin-services-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .admin-service-row {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 6px 10px;
   border: 2px solid rgba(15, 23, 42, 0.12);
   border-radius: var(--radius);
+  font-size: 0.95rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.admin-service-row button {
+  align-self: stretch;
 }
 
 .admin-action-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 10px;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .admin-confirm-overlay {
