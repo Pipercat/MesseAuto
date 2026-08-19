@@ -49,24 +49,37 @@ Die Taster werden als aktiv LOW erwartet. Der bisherige Aufbau mit externen Pull
 
 Der Sketch ist aktuell für 75 NeoPixel konfiguriert.
 
-## ESP32 Sensor
+## ESP32 Sensor/Aux
 
-### Arduino-Bibliotheken
-
-- `OneWire`
-- `DallasTemperature`
-
-### Aktuelle Standardpins
+### Aktuelle Standardpins (Quelle: `esp32-codes/esp32_sensor/esp32_sensor.ino`)
 
 | Sensor | Pin |
 |---|---:|
-| DS18B20 Datenleitung | GPIO 4 |
+| Temperatur (analog LM35/TMP36) | GPIO 34 (ADC) |
 | Ultraschall Trigger | GPIO 18 |
 | Ultraschall Echo | GPIO 19 |
 
-Diese drei Pins sind als anpassbare Standardwerte gesetzt, weil für den Sensor-ESP32 bisher keine endgültige Pinbelegung dokumentiert war.
+Diese drei Pins sind als anpassbare Standardwerte gesetzt, weil für den Sensor-ESP32 bisher keine endgültige Pinbelegung dokumentiert war. Temperatur wird aktuell analog (LM35/TMP36 an ADC) ausgelesen, **nicht** per DS18B20/OneWire.
 
 **Wichtig:** Bei einem 5-V-Ultraschallsensor darf ein 5-V-Echo-Signal nicht direkt an einen 3,3-V-ESP32-GPIO gelegt werden. Nutze einen passenden Pegelwandler oder Spannungsteiler.
+
+### Hupen-Audio: MAX98357A (I2S), ersetzt PAM8406-Annahme aus M11
+
+Real verkabelt (Stand: ESP Sensor/Aux angeschlossen, Hardware bestätigt):
+
+| MAX98357A Pin | ESP32 GPIO | Funktion |
+|---|---:|---|
+| VIN | 5V (oder 3V3) | Spannungsversorgung (2,5–5,5V) |
+| GND | GND | Masse |
+| LRC | GPIO 25 | Left/Right Clock (Word Select) |
+| BCLK | GPIO 26 | Bit Clock |
+| DIN | GPIO 22 | Digitale Audiodaten (bestätigt, kollisionsfrei zu LRC) |
+| GAIN | offen | Standard 9dB Gain |
+| SD | offen | Mono-Mix aus L+R |
+
+Der MAX98357A ist ein I2S-Class-D-Verstärker mit **eingebautem DAC** — anders als der in M11 ursprünglich angenommene PAM8406 (reiner analoger Leistungsverstärker ohne DAC). Das vereinfacht MA-11-004 (Audiopfad): kein separater I2S-DAC/Codec nötig, der ESP32 gibt direkt I2S-Daten aus. MA-11-003 (PAM8406-spezifische Prüfungen: Analogeingang, Masseführung als reiner Verstärker) entfällt in der bisherigen Form und wird auf den MAX98357A angepasst.
+
+Keine Pin-Kollision mit den bestehenden Sensor-Pins (Temperatur GPIO34, Trigger GPIO18, Echo GPIO19).
 
 ## Raspberry Pi 1
 
