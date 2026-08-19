@@ -7,9 +7,8 @@ from typing import Any, Callable
 logger = logging.getLogger("messeauto.actor_button")
 
 # Taster 1-7 aus HARDWARE.md (ESP32 Actor) auf bestehende GPIO-Ausgaenge
-# des Pi 1 abgebildet. Taster 8 ist fuer die spaetere Hupe reserviert
-# (MA-11-006A) und wird hier bewusst NICHT als normaler Toggle behandelt.
-# Taster 9/10 bleiben Reserve.
+# des Pi 1 abgebildet. Taster 8 ist die physische Hupe (MA-11-006A) und wird
+# ueber on_horn_button statt toggle_output gefuehrt. Taster 9/10 bleiben Reserve.
 BUTTON_OUTPUT_MAP: dict[int, str] = {
     1: "highBeam",
     2: "lowBeam",
@@ -19,10 +18,15 @@ BUTTON_OUTPUT_MAP: dict[int, str] = {
     6: "hazard",
     7: "fan",
 }
-RESERVED_BUTTONS = (8, 9, 10)
+HORN_BUTTON = 8
+RESERVED_BUTTONS = (9, 10)
 
 
-def handle_button_event(payload: bytes, toggle_output: Callable[[str], Any]) -> None:
+def handle_button_event(
+    payload: bytes,
+    toggle_output: Callable[[str], Any],
+    on_horn_button: Callable[[bool], Any] | None = None,
+) -> None:
     try:
         data = json.loads(payload.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
@@ -39,6 +43,12 @@ def handle_button_event(payload: bytes, toggle_output: Callable[[str], Any]) -> 
         button = int(button)
     except (TypeError, ValueError):
         logger.warning("actor/event/button: ungueltige button-Nummer verworfen: %r", data.get("button"))
+        return
+
+    if button == HORN_BUTTON:
+        if on_horn_button is not None and edge in ("pressed", "released"):
+            on_horn_button(edge == "pressed")
+        logger.info("actor/event/button: Taster 8 (Hupe) edge=%s", edge)
         return
 
     if button in RESERVED_BUTTONS:

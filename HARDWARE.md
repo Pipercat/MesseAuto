@@ -60,12 +60,12 @@ Zusätzlich zum MQTT-Pfad (M11) gibt es eine **direkte Hardware-Verbindung** zwi
 
 | Sensor | Pin |
 |---|---:|
-| Temperatur (analog LM35/TMP36) | GPIO 34 (ADC) |
+| Temperatur (analog LM35/TMP36) | GPIO 35 (ADC) |
 | Ultraschall Trigger | GPIO 18 |
 | Ultraschall Echo | GPIO 19 |
 | Hupen-Trigger (Direktleitung von Actor-GPIO 21) | GPIO 13 |
 
-Keine Pin-Kollision zwischen Sensorik (34/18/19), Hupen-Trigger (13) und MAX98357A-I2S (25/26/22).
+Keine Pin-Kollision zwischen Sensorik (35/18/19), Hupen-Trigger (13) und MAX98357A-I2S (25/26/22).
 
 Diese drei Pins sind als anpassbare Standardwerte gesetzt, weil für den Sensor-ESP32 bisher keine endgültige Pinbelegung dokumentiert war. Temperatur wird aktuell analog (LM35/TMP36 an ADC) ausgelesen, **nicht** per DS18B20/OneWire.
 
@@ -79,15 +79,45 @@ Real verkabelt (Stand: ESP Sensor/Aux angeschlossen, Hardware bestätigt):
 |---|---:|---|
 | VIN | 5V (oder 3V3) | Spannungsversorgung (2,5–5,5V) |
 | GND | GND | Masse |
-| LRC | GPIO 25 | Left/Right Clock (Word Select) |
-| BCLK | GPIO 26 | Bit Clock |
-| DIN | GPIO 22 | Digitale Audiodaten (bestätigt, kollisionsfrei zu LRC) |
+| LRC | GPIO 27 | Left/Right Clock (Word Select) |
+| BCLK | GPIO 25 | Bit Clock |
+| DIN | GPIO 26 | Digitale Audiodaten |
 | GAIN | offen | Standard 9dB Gain |
 | SD | offen | Mono-Mix aus L+R |
 
 Der MAX98357A ist ein I2S-Class-D-Verstärker mit **eingebautem DAC** — anders als der in M11 ursprünglich angenommene PAM8406 (reiner analoger Leistungsverstärker ohne DAC). Das vereinfacht MA-11-004 (Audiopfad): kein separater I2S-DAC/Codec nötig, der ESP32 gibt direkt I2S-Daten aus. MA-11-003 (PAM8406-spezifische Prüfungen: Analogeingang, Masseführung als reiner Verstärker) entfällt in der bisherigen Form und wird auf den MAX98357A angepasst.
 
 Keine Pin-Kollision mit den bestehenden Sensor-Pins (Temperatur GPIO34, Trigger GPIO18, Echo GPIO19).
+
+## ESP32 Dial/M10 (ESP3, Bring-up-Test)
+
+Dritter ESP32 für den M10-Drehregler-Bring-up (siehe `TASKS.md` MA-10-001 ff.), Modul **ESP32-WROOM-32** (kein PSRAM). Firmware: `esp32-codes/esp32_dial_test/esp32_dial_test.ino`.
+
+Aktuell nur per USB **temporär zum Flashen** an Pi 1 angeschlossen (nicht dauerhaft, siehe Sicherheitsregel oben); im festen Betrieb bekommt das Board eine eigene 5V-Versorgung.
+
+### Magnet-Winkelsensoren (2x AS5600)
+
+Beide AS5600 haben dieselbe I2C-Adresse 0x36 und hängen deshalb auf zwei getrennten I2C-Bussen (ESP32 `Wire`/`Wire1`), nicht an einem gemeinsamen Bus. Finale Version soll laut MA-10-003 einen TCA9548A-Multiplexer nutzen.
+
+| Sensor | VCC | SDA | SCL | Bus |
+|---|---|---:|---:|---|
+| Sensor 1 | 3.3V, DIR→GND | GPIO 22 | GPIO 21 | `Wire` |
+| Sensor 2 | 3.3V | GPIO 18 | GPIO 19 | `Wire1` |
+
+Offener Punkt: Beide Sensoren melden im Status-Register das Flag „Magnet zu schwach" (AS5600 AGC-Status) — Luftspalt zum Magneten muss noch verringert bzw. ein stärkerer Magnet verbaut werden, bevor die Winkelwerte belastbar sind.
+
+### Stepper (2x 28BYJ-48 über ULN2003)
+
+Beide Stepper haben eine **eigene 5V-Versorgung, getrennt vom ESP32-USB-Rail** (gemeinsame Masse mit dem ESP32). Grund: Bei Versorgung über den ESP32-eigenen VIN/USB-Rail kam es real gemessen zu Spannungseinbrüchen (Brownout/Flash-Read-Error beim ESP32 selbst), sobald der Stepper Spulenstrom zog.
+
+| Stepper | ULN2003 IN1 | IN2 | IN3 | IN4 |
+|---|---:|---:|---:|---:|
+| Stepper 1 | GPIO 25 | GPIO 26 | GPIO 27 | GPIO 14 |
+| Stepper 2 | GPIO 32 | GPIO 4 | GPIO 16 | GPIO 17 |
+
+### Bekannte Board-Eigenheit: instabile Crystal-Frequenz
+
+`esptool` meldet bei diesem Board wiederholt `Warning: Detected crystal freq 15.55 MHz is quite different to normalized freq 26 MHz. Unsupported crystal in use?`. Dadurch schlägt die interne Hash-Verifikation nach dem Schreiben regelmäßig mit `Serial data stream stopped: Possible serial noise or corruption` fehl, obwohl der eigentliche Schreibvorgang (100% geschrieben) korrekt war. Verlässlicher Nachweis für einen erfolgreichen Flash-Vorgang ist bei diesem Board daher ein **funktionaler Boot-Test** (Reset + Serial-Log prüfen), nicht die esptool-interne Verifikation.
 
 ## Raspberry Pi 1
 
@@ -131,6 +161,8 @@ Aufbau (Stand MA-01-002):
 - **Das WPA2-Passwort liegt bewusst nur lokal auf Pi 1 (`hostapd-messecar.conf`, Modus 600) und wird nicht in dieses öffentliche Repo committet.**
 
 Offen: Neustart-Persistenztest von `ap0`/hostapd/dnsmasq nach echtem Pi-1-Reboot sowie realer Verbindungstest beider ESPs (folgt mit M4/M5-Firmware).
+
+**Wichtige Falle (real aufgetreten, mehrfach):** `wlan0`/`ap0` teilen sich den Funk-Chip und müssen auf demselben Kanal laufen. Sobald `wlan0` NICHT mit einem 2,4GHz-Netz verbunden ist (z. B. weil NetworkManager automatisch zu einem bekannten 5GHz-Netz wie der Messehalle-WLAN wechselt), driftet `ap0` auf einen 5GHz-Kanal ab — die ESP32 (2,4GHz-only) können sich dann nicht mehr verbinden, ohne dass das offensichtlich ist (AP läuft scheinbar normal, nur auf falschem Band). Fix: `autoconnect=no` für alle bekannten 5GHz-Netze setzen, nur ein bekanntes 2,4GHz-Netz (z. B. Handy-Hotspot) mit hoher `autoconnect-priority` behalten, damit `wlan0` sich nicht selbstständig auf 5GHz umschaltet. Für den späteren Messebetrieb ohne verfügbaren 2,4GHz-Hotspot braucht dieses AP-Design noch eine robustere Lösung (z. B. Kanal in der hostapd-Config fest erzwingen statt an `wlan0` zu koppeln, oder zweiten WLAN-Adapter für den AP nutzen).
 
 ### MQTT-Broker (Mosquitto) auf Pi 1
 

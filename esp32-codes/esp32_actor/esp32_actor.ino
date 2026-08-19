@@ -40,6 +40,20 @@ constexpr uint8_t FREE_ONE_PIN = 25;
 constexpr uint8_t FREE_TWO_PIN = 26;
 constexpr uint8_t FREE_THREE_PIN = 27;
 
+// Taster 8 (Index 7) ist die Hupe (M11), kein normaler Toggle mehr.
+// Direktleitung zum ESP Sensor/Aux (dort GPIO13) - siehe HARDWARE.md
+// "Direkte Hupenleitung Actor -> Sensor/Aux". Haelt HIGH solange T8
+// gedrueckt ist (Hold-to-Honk, kein Toggle).
+constexpr uint8_t HORN_TRIGGER_PIN = 21;
+constexpr uint8_t HORN_BUTTON_INDEX = 7;
+
+// Fahrmotor (M10): GPIO4 -> externer Treiber, gibt 0-5V fuer 0-100% aus.
+// Boot-sicher: Motor startet immer bei 0%, Sollwert kommt per MQTT (nicht retained).
+constexpr uint8_t MOTOR_PWM_PIN = 4;
+constexpr uint32_t MOTOR_PWM_FREQ_HZ = 5000;
+constexpr uint8_t MOTOR_PWM_RESOLUTION_BITS = 8;
+uint8_t motorPercent = 0;
+
 // GPIO25/26/27 sind laut aktueller Eingangsbelegung bereits Buttonpins.
 // Solange die ESP-Eingaenge gleich bleiben, werden diese Ausgaenge nicht aktiv
 // getrieben, damit Blinker-/Warnblinker-Eingaben nicht kaputtgehen.
@@ -96,6 +110,7 @@ constexpr const char *TOPIC_STATUS = "messecar/actor/status";
 constexpr const char *TOPIC_EVENT_BUTTON = "messecar/actor/event/button";
 constexpr const char *TOPIC_STATE = "messecar/actor/state";
 constexpr const char *TOPIC_COMMAND = "messecar/actor/command";
+constexpr const char *TOPIC_MOTOR_COMMAND = "messecar/actor/motor/command";
 
 WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient);
@@ -264,6 +279,7 @@ void publishActorState() {
   outputs["rightIndicator"] = state.rightIndicator;
   outputs["hazard"] = state.hazard;
   outputs["fan"] = state.fan;
+  doc["motor_percent"] = motorPercent;
   char buffer[256];
   serializeJson(doc, buffer, sizeof(buffer));
   mqttClient.publish(TOPIC_STATE, buffer, false);
@@ -285,7 +301,33 @@ void publishButtonEvent(uint8_t index, bool pressed) {
 
 void setStateByName(const String &name, bool enabled);
 
+void setMotorPercent(uint8_t percent) {
+  motorPercent = percent;
+  const uint32_t maxDuty = (1u << MOTOR_PWM_RESOLUTION_BITS) - 1;
+  const uint32_t duty = (static_cast<uint32_t>(percent) * maxDuty) / 100;
+  ledcWrite(MOTOR_PWM_PIN, duty);
+}
+
+void handleMotorCommand(byte *payload, unsigned int length) {
+  JsonDocument doc;
+  DeserializationError parseError = deserializeJson(doc, payload, length);
+  if (parseError) {
+    return;
+  }
+  if (!doc["percent"].is<int>()) {
+    return;
+  }
+  int percent = doc["percent"];
+  percent = constrain(percent, 0, 100);
+  setMotorPercent(static_cast<uint8_t>(percent));
+}
+
 void handleMqttMessage(char *topic, byte *payload, unsigned int length) {
+  if (strcmp(topic, TOPIC_MOTOR_COMMAND) == 0) {
+    handleMotorCommand(payload, length);
+    return;
+  }
+
   JsonDocument doc;
   DeserializationError parseError = deserializeJson(doc, payload, length);
   if (parseError) {
@@ -339,6 +381,7 @@ void ensureMqttConnected() {
   );
   if (connected) {
     mqttClient.subscribe(TOPIC_COMMAND, 1);
+    mqttClient.subscribe(TOPIC_MOTOR_COMMAND, 0);
     publishStatus("online", true);
     publishActorState();
   }
@@ -521,9 +564,8 @@ void handleButtonPress(uint8_t index) {
     case 6:
       state.fan = !state.fan;
       break;
-    case 7:
-      state.freeOne = !state.freeOne;
-      break;
+    // case 7 (Taster 8) ist die Hupe - wird direkt in readButtons()
+    // behandelt (Hold-to-Honk-Direktleitung), erreicht diese Funktion nicht.
     case 8:
       state.freeTwo = !state.freeTwo;
       break;
@@ -551,7 +593,11 @@ void readButtons() {
       buttons[i].stablePressed = rawPressed;
       sendButtonLog(i, buttons[i].stablePressed);
       publishButtonEvent(i, buttons[i].stablePressed);
-      if (buttons[i].stablePressed) {
+
+      if (i == HORN_BUTTON_INDEX) {
+        // Hold-to-Honk: Direktleitung folgt sofort press/release, kein Toggle.
+        digitalWrite(HORN_TRIGGER_PIN, buttons[i].stablePressed ? HIGH : LOW);
+      } else if (buttons[i].stablePressed) {
         handleButtonPress(i);
       }
     }
@@ -586,6 +632,11 @@ void setup() {
   configureOutputPin(FREE_ONE_PIN);
   configureOutputPin(FREE_TWO_PIN);
   configureOutputPin(FREE_THREE_PIN);
+  pinMode(HORN_TRIGGER_PIN, OUTPUT);
+  digitalWrite(HORN_TRIGGER_PIN, LOW);
+
+  ledcAttach(MOTOR_PWM_PIN, MOTOR_PWM_FREQ_HZ, MOTOR_PWM_RESOLUTION_BITS);
+  setMotorPercent(0);
 
   underbodyPixels.begin();
   underbodyPixels.setBrightness(180);

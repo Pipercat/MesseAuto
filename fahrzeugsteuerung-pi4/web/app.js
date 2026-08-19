@@ -353,6 +353,30 @@ function showConfirmDialog(text) {
   });
 }
 
+const hornButton = document.getElementById("horn-button");
+if (hornButton) {
+  let hornPressed = false;
+
+  const setHornPressed = (pressed) => {
+    if (hornPressed === pressed) {
+      return;
+    }
+    hornPressed = pressed;
+    hornButton.classList.toggle("is-active", pressed);
+    fetch(pressed ? "/api/horn/press" : "/api/horn/release", { method: "POST" }).catch(() => {});
+  };
+
+  hornButton.addEventListener("pointerdown", (event) => {
+    event.preventDefault();
+    hornButton.setPointerCapture(event.pointerId);
+    setHornPressed(true);
+  });
+  hornButton.addEventListener("pointerup", () => setHornPressed(false));
+  hornButton.addEventListener("pointerleave", () => setHornPressed(false));
+  hornButton.addEventListener("pointercancel", () => setHornPressed(false));
+  window.addEventListener("blur", () => setHornPressed(false));
+}
+
 document.addEventListener("click", async (event) => {
   const restartButton = event.target.closest("[data-admin-restart]");
   if (restartButton) {

@@ -16,6 +16,7 @@ from admin_actions import RESTARTABLE_SERVICES, reboot_pi1, restart_service, shu
 from database_client import DatabaseClient
 from esp32_actor_bridge import ESP32ActorBridge
 from gpio_controller import create_controller
+from horn_controller import HornController
 from mqtt_client import MqttClient
 from mqtt_status_store import MqttStatusStore
 from sensor_telemetry import handle_sensor_telemetry
@@ -33,6 +34,11 @@ controller = create_controller()
 esp32_actor = ESP32ActorBridge()
 database_client = DatabaseClient()
 mqtt_client = MqttClient()
+horn_state: dict[str, Any] | None = None
+horn_state_lock = threading.RLock()
+horn_controller = HornController(
+    lambda payload: mqtt_client.publish_command("messecar/horn/command", payload)
+)
 heartbeat_interval = float(os.getenv("MESSEAUTO_HEARTBEAT_INTERVAL", "5"))
 heartbeat_stop = threading.Event()
 last_test_result: dict[str, Any] | None = None
@@ -71,13 +77,28 @@ def esp_mqtt_transport(status_store: MqttStatusStore, extra_last_seen_ms: int | 
     return {"online": online, "status": status["status"], "last_seen": last_seen, "fresh": fresh}
 
 
+def handle_horn_state(topic: str, payload: bytes) -> None:
+    global horn_state
+    try:
+        data = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        actor_state_logger.warning("horn/state: ungueltiges JSON verworfen (%s)", error)
+        return
+    if not isinstance(data, dict) or "device" not in data or "timestamp_ms" not in data:
+        actor_state_logger.warning("horn/state: Pflichtfelder fehlen, verworfen: %r", data)
+        return
+    with horn_state_lock:
+        horn_state = data
+
+
 esp32_actor.start()
 mqtt_client.start()
 mqtt_client.subscribe(
     "messecar/actor/event/button",
-    lambda topic, payload: handle_button_event(payload, controller.toggle_output),
+    lambda topic, payload: handle_button_event(payload, controller.toggle_output, horn_controller.set_physical),
 )
 mqtt_client.subscribe("messecar/actor/state", handle_actor_state)
+mqtt_client.subscribe("messecar/horn/state", handle_horn_state)
 def handle_sensor_telemetry_and_forward(topic: str, payload: bytes) -> None:
     handle_sensor_telemetry(payload, sensor_state, sensor_state_lock)
     with sensor_state_lock:
@@ -309,6 +330,25 @@ def api_sensors():
     return jsonify({"ok": True, "sensors": snapshot})
 
 
+@app.post("/api/horn/press")
+def api_horn_press():
+    horn_controller.set_screen(True)
+    return jsonify({"ok": True, "horn": horn_controller.snapshot()})
+
+
+@app.post("/api/horn/release")
+def api_horn_release():
+    horn_controller.set_screen(False)
+    return jsonify({"ok": True, "horn": horn_controller.snapshot()})
+
+
+@app.get("/api/horn")
+def api_horn():
+    with horn_state_lock:
+        state = dict(horn_state) if horn_state else None
+    return jsonify({"ok": True, "input": horn_controller.snapshot(), "state": state})
+
+
 @app.post("/api/esp32/actor/probe")
 def api_esp32_actor_probe():
     probe = esp32_actor.probe()
@@ -421,9 +461,11 @@ def api_set_motor():
     data = request_data()
     if "percent" not in data:
         return json_error("Feld 'percent' fehlt")
-    controller.set_motor(data["percent"])
-    esp32_actor.send_motor(data["percent"])
-    database_client.send_event("vehicle_motor", {"percent": data["percent"]})
+    percent = max(0, min(100, int(data["percent"])))
+    controller.set_motor(percent)
+    esp32_actor.send_motor(percent)
+    mqtt_client.publish_command("messecar/actor/motor/command", {"percent": percent})
+    database_client.send_event("vehicle_motor", {"percent": percent})
     return jsonify({"ok": True, "state": combined_state()})
 
 

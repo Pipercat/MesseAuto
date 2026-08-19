@@ -16,7 +16,16 @@ Alle Topics tragen den gemeinsamen Präfix `messecar/`. Neue Topics werden aussc
 | `messecar/sensor/telemetry` | ESP Sensor/Aux | Pi 1 | Temperatur- und Sitzabstands-Telemetrie. |
 | `messecar/pi1/status` | Pi 1 | ESP Actor, ESP Sensor/Aux | Online-Status von Pi 1 selbst, damit ESPs einen Pi-1-Ausfall erkennen können. |
 
-Weitere Topics (Drive-MQTT aus M10, Horn-MQTT aus M11) werden bei Bearbeitung der jeweiligen Tasks (MA-10-017, MA-11-007, MA-11-007A, MA-11-008) hier ergänzt.
+Weitere Topics (Drive-MQTT aus M10) werden bei Bearbeitung der jeweiligen Tasks (MA-10-017) hier ergänzt.
+
+## Horn-Topics (M11)
+
+| Topic | Publisher | Subscriber | Zweck |
+|---|---|---|---|
+| `messecar/horn/command` | Pi 1 | ESP Sensor/Aux | Absoluter, idempotenter Soll-Zustand (`active: true/false`) mit `seq`; solange `active:true`, Keepalive ca. 10 Hz. Nicht retained. |
+| `messecar/horn/state` | ESP Sensor/Aux | Pi 1 | Bestätigter Ist-Zustand (`active`, `audio_ok`, optional Fehler). |
+
+Payload `messecar/horn/command`: `{"device":"pi1","timestamp_ms":...,"seq":N,"active":true}`. Sicherheitsregeln: kein Keepalive für 300ms → ESP schaltet Hupe lokal aus (MA-11-010); `seq` muss streng steigend sein, ältere/doppelte `active:true` werden ignoriert (MA-11-011); nach Boot/Reconnect ist die Hupe immer aus, bis eine neue aktuelle Eingabe kommt (MA-11-012).
 
 ## Nachrichtenformat (MA-02-002)
 

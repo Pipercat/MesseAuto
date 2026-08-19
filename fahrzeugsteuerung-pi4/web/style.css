@@ -1,5 +1,5 @@
 :root {
-  --bg: #eef3f8;
+  --bg: #d9e1ea;
   --bg-raised: #ffffff;
 
   --panel: rgba(255, 255, 255, 0.98);
@@ -400,7 +400,20 @@ h2 {
 
 /* ---------- Fahrzeugansicht ---------- */
 
-.vehicle-layout,
+.vehicle-layout {
+  display: grid;
+
+  grid-template-columns: minmax(360px, 0.62fr) minmax(700px, 1.38fr);
+  grid-template-areas:
+    "brand controls"
+    "horn controls"
+    "motor motor";
+
+  gap: 12px 24px;
+
+  align-items: start;
+}
+
 .test-layout {
   display: grid;
 
@@ -409,6 +422,27 @@ h2 {
   gap: 24px;
 
   align-items: start;
+}
+
+.vehicle-layout .brand-visual {
+  grid-area: brand;
+}
+
+.vehicle-layout .control-bank {
+  grid-area: controls;
+}
+
+.vehicle-layout .horn-panel {
+  grid-area: horn;
+  padding: 8px;
+}
+
+.vehicle-layout .motor-panel {
+  grid-area: motor;
+  padding: 14px;
+  width: 100%;
+  max-width: 470px;
+  margin: 0 auto;
 }
 
 /* ---------- Karten / Panels ---------- */
@@ -640,8 +674,33 @@ h2 {
 
 /* ---------- Motor ---------- */
 
-.motor-panel {
-  grid-column: 1 / -1;
+.horn-panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 14px;
+}
+
+.horn-button {
+  width: 100%;
+  max-width: 320px;
+  min-height: 84px;
+  border: 3px solid var(--red);
+  border-radius: 999px;
+  background: #ffffff;
+  color: var(--red);
+  font-size: 1.6rem;
+  font-weight: 950;
+  letter-spacing: 0.08em;
+  touch-action: none;
+  user-select: none;
+  transition: background 0.08s ease, color 0.08s ease;
+}
+
+.horn-button.is-active {
+  background: var(--red);
+  color: #ffffff;
 }
 
 .motor-output {
@@ -651,7 +710,7 @@ h2 {
 
   gap: 18px;
 
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 .motor-output strong {
@@ -689,7 +748,7 @@ h2 {
 }
 
 .technical-note {
-  margin: 10px 0 0;
+  margin: 4px 0 0;
 
   color: var(--muted);
 
