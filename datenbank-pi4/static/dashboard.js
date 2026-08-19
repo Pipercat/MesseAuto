@@ -353,12 +353,44 @@
     underbody: "Unterboden",
     lowBeam: "Abblendlicht",
     highBeam: "Fernlicht",
-    indicatorLeft: "Blinker links",
-    indicatorRight: "Blinker rechts",
+    indicator: "Blinker",
     hazard: "Warnblinker",
     fan: "Lüfter",
   };
   const liveSignalOrder = Object.keys(liveSignalLabels);
+
+  // Blinker links/rechts werden in der Live-Ansicht zu einer Zeile
+  // zusammengefasst (ODER-Verknuepfung), damit der Kasten nicht ueberladen wirkt.
+  function mergeIndicatorSignal(signals) {
+    const left = signals.indicatorLeft || { active: false, transitions: [] };
+    const right = signals.indicatorRight || { active: false, transitions: [] };
+    const merged = [...left.transitions.map((t) => ({ ...t, side: "left" })), ...right.transitions.map((t) => ({ ...t, side: "right" }))]
+      .sort((a, b) => a.timestamp_ms - b.timestamp_ms);
+
+    let leftState = left.transitions.length > 0 ? !left.transitions[0].active : left.active;
+    let rightState = right.transitions.length > 0 ? !right.transitions[0].active : right.active;
+    const transitions = [];
+    let prevOr = leftState || rightState;
+    merged.forEach((t) => {
+      if (t.side === "left") {
+        leftState = t.active;
+      } else {
+        rightState = t.active;
+      }
+      const orState = leftState || rightState;
+      if (orState !== prevOr) {
+        transitions.push({ timestamp_ms: t.timestamp_ms, active: orState });
+        prevOr = orState;
+      }
+    });
+
+    return {
+      active: left.active || right.active,
+      transitions,
+      duration_ms: Math.min(left.duration_ms ?? Infinity, right.duration_ms ?? Infinity),
+      activation_count_total: (left.activation_count_total || 0) + (right.activation_count_total || 0),
+    };
+  }
 
   function formatDurationMs(ms) {
     const totalSeconds = Math.floor(ms / 1000);
@@ -382,13 +414,15 @@
     const rowHeight = height / liveSignalOrder.length;
     const nowMs = data.now_ms;
     const windowMs = data.window_seconds * 1000;
-    const labelWidth = 110;
+    ctx.font = `bold ${labelFont.match(/\d+px/)[0]} "Segoe UI", system-ui, sans-serif`;
+    const widestLabel = Math.max(...liveSignalOrder.map((s) => ctx.measureText(liveSignalLabels[s] || s).width));
+    const labelWidth = widestLabel + 24;
     const traceRight = width - 8;
 
     liveSignalOrder.forEach((signal, index) => {
       const rowTop = index * rowHeight;
       const rowMid = rowTop + rowHeight / 2;
-      const info = data.signals[signal] || { active: false, transitions: [] };
+      const info = signal === "indicator" ? mergeIndicatorSignal(data.signals) : data.signals[signal] || { active: false, transitions: [] };
 
       ctx.fillStyle = info.active ? palette.green : palette.text;
       ctx.font = `bold ${labelFont.match(/\d+px/)[0]} "Segoe UI", system-ui, sans-serif`;
@@ -449,6 +483,90 @@
     } catch (error) {
       // naechster Poll versucht es erneut
     }
+  }
+
+  let curvesWindowSeconds = 60;
+
+  function drawLiveCurves(data) {
+    const surface = canvasContext("live-curves-chart");
+    if (!surface) {
+      return;
+    }
+    const { ctx, width, height } = surface;
+    const temp = data.series.temperature_c;
+    const dist = data.series.seat_distance_cm;
+
+    const valuesLabel = document.getElementById("live-curves-values");
+    if (valuesLabel) {
+      const t = temp.current !== null ? `${temp.current.toFixed(1)}°C` : "-";
+      const d = dist.current !== null ? `${dist.current.toFixed(0)}cm` : "-";
+      valuesLabel.textContent = `${t} / ${d}`;
+    }
+
+    if (temp.points.length < 2 && dist.points.length < 2) {
+      emptyState(surface, "Keine Sensordaten (Sensor/Aux nicht verbunden)");
+      return;
+    }
+
+    const nowMs = Date.now();
+    const windowMs = data.window_seconds * 1000;
+    const left = 46;
+    const right = 10;
+    const top = 10;
+    const bottom = 10;
+    const xFor = (t) => left + ((t - (nowMs - windowMs)) / windowMs) * (width - left - right);
+
+    const plotSeries = (points, color, minFixed, maxFixed) => {
+      if (points.length < 2) {
+        return;
+      }
+      const values = points.map((p) => p.v);
+      const min = minFixed ?? Math.min(...values);
+      const max = maxFixed ?? Math.max(...values);
+      const span = max - min || 1;
+      const yFor = (v) => top + (height - top - bottom) * (1 - (v - min) / span);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      points.forEach((p, i) => {
+        const x = xFor(p.t);
+        const y = yFor(p.v);
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      });
+      ctx.stroke();
+    };
+
+    plotSeries(temp.points, palette.green);
+    plotSeries(dist.points, palette.cyan);
+  }
+
+  async function pollLiveCurves() {
+    try {
+      const response = await fetch(`/api/live-curves?window_seconds=${curvesWindowSeconds}`);
+      const payload = await response.json();
+      if (payload.ok) {
+        drawLiveCurves(payload.data);
+      }
+    } catch (error) {
+      // naechster Poll versucht es erneut
+    }
+  }
+
+  const curveToggle = document.getElementById("curve-window-toggle");
+  if (curveToggle) {
+    curveToggle.addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-window]");
+      if (!button) {
+        return;
+      }
+      curvesWindowSeconds = Number(button.dataset.window);
+      curveToggle.querySelectorAll("button").forEach((b) => b.classList.toggle("is-active", b === button));
+      pollLiveCurves();
+    });
   }
 
   function safeRenderCharts() {

@@ -186,8 +186,30 @@ h2 {
 }
 
 .analytics-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   min-height: 0;
+}
+
+.curve-window-toggle {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  flex: 0 0 auto;
+}
+
+.curve-window-toggle button {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  padding: 3px 6px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.curve-window-toggle button.is-active {
+  background: var(--yellow);
+  border-color: var(--yellow-dark);
 }
 
 .tables-grid {

@@ -76,10 +76,26 @@ mqtt_client.subscribe(
     lambda topic, payload: handle_button_event(payload, controller.toggle_output),
 )
 mqtt_client.subscribe("messecar/actor/state", handle_actor_state)
-mqtt_client.subscribe(
-    "messecar/sensor/telemetry",
-    lambda topic, payload: handle_sensor_telemetry(payload, sensor_state, sensor_state_lock),
-)
+def handle_sensor_telemetry_and_forward(topic: str, payload: bytes) -> None:
+    handle_sensor_telemetry(payload, sensor_state, sensor_state_lock)
+    with sensor_state_lock:
+        temperature = sensor_state.get("temperature_c") or {}
+        distance = sensor_state.get("seat_distance_cm") or {}
+    if temperature.get("error") and distance.get("error"):
+        return
+    database_client.send_event(
+        "sensor_measurement",
+        {
+            "source_device": "esp32_sensor",
+            "temperature_c": temperature.get("value"),
+            "seat_distance_mm": (distance["value"] * 10) if distance.get("value") is not None else None,
+            "valid": True,
+            "message": None,
+        },
+    )
+
+
+mqtt_client.subscribe("messecar/sensor/telemetry", handle_sensor_telemetry_and_forward)
 mqtt_client.subscribe("messecar/actor/status", actor_status_store.handler)
 mqtt_client.subscribe("messecar/sensor/status", sensor_status_store.handler)
 atexit.register(controller.shutdown)

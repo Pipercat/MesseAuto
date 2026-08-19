@@ -78,6 +78,19 @@
             </div>
             <canvas id="vehicle-chart" width="520" height="230"></canvas>
           </article>
+
+          <article class="panel chart-panel">
+            <div class="panel-head">
+              <h2>Messwerte</h2>
+              <span id="live-curves-values">- / -</span>
+            </div>
+            <div class="curve-window-toggle" id="curve-window-toggle">
+              <button type="button" data-window="10">10s</button>
+              <button type="button" data-window="60" class="is-active">60s</button>
+              <button type="button" data-window="300">5min</button>
+            </div>
+            <canvas id="live-curves-chart" width="520" height="200"></canvas>
+          </article>
         </section>
 
         <section class="tables-grid" aria-label="Tabellen">

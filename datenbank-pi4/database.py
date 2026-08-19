@@ -132,6 +132,45 @@ def store_event(event_type: str, payload: dict[str, Any]) -> int:
         return event_id
 
 
+def live_curves(window_seconds: int = 60) -> dict[str, Any]:
+    """Kontinuierliche Live-Zeitreihen fuer Screen 2 (MA-07-001C).
+
+    Aktuell verfuegbar: Temperatur und Sitzabstand (aus M3/M5-Telemetrie).
+    speed_target/RSSI/Latenz folgen mit M10/M12, sobald die Quellen existieren.
+    """
+
+    cutoff = (datetime.now(timezone.utc) - timedelta(seconds=window_seconds)).isoformat()
+    with connect() as connection:
+        rows = fetch_all(
+            connection,
+            f"""
+            SELECT timestamp, temperature_c, seat_distance_mm FROM sensor_measurements
+            WHERE timestamp >= '{cutoff}' AND valid = 1
+            ORDER BY timestamp ASC
+            """,
+        )
+
+    temperature = []
+    distance = []
+    for row in rows:
+        try:
+            ts_ms = int(datetime.fromisoformat(row["timestamp"]).timestamp() * 1000)
+        except ValueError:
+            continue
+        if row["temperature_c"] is not None:
+            temperature.append({"t": ts_ms, "v": row["temperature_c"]})
+        if row["seat_distance_mm"] is not None:
+            distance.append({"t": ts_ms, "v": row["seat_distance_mm"] / 10.0})
+
+    return {
+        "window_seconds": window_seconds,
+        "series": {
+            "temperature_c": {"points": temperature, "current": temperature[-1]["v"] if temperature else None},
+            "seat_distance_cm": {"points": distance, "current": distance[-1]["v"] if distance else None},
+        },
+    }
+
+
 def prune_old_data(connection: sqlite3.Connection, retention_days: int = RETENTION_DAYS) -> None:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
     for table in ("raw_events", "sensor_measurements", "seat_tests"):
