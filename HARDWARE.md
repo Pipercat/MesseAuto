@@ -117,3 +117,13 @@ Offen: Neustart-Persistenztest von `ap0`/hostapd/dnsmasq nach echtem Pi-1-Reboot
 - Eigene Config `/etc/mosquitto/conf.d/messecar.conf`: Listener **ausschließlich** auf `10.10.10.1` (AP, für ESPs) und `127.0.0.1` (lokale Pi-1-App) — bewusst **nicht** auf `wlan0`/`eth0` erreichbar (getestet, Connection refused).
 - `allow_anonymous true` im aktuell isolierten Lokalnetz; Zugangsschutz kann bei Bedarf später ergänzt werden.
 - Port 1883, kein TLS (rein lokales Netz ohne Internetanbindung).
+
+### Feste Boot-Zeitbasis auf Pi 1 und Pi 2
+
+Beide Pis haben je nach WLAN-Umgebung wechselnd (mal keines, mal eines, mal beide) echtes Internet und damit unzuverlässiges NTP; die RTCs (`fake-hwclock`) liefern beim Booten unterschiedliche alte Werte. Ergebnis ohne Gegenmaßnahme: Pi 1 und Pi 2 zeigen unterschiedliche, teils stark abweichende Uhrzeiten (beobachtet: bis zu 16 Stunden Differenz).
+
+Lösung: `systemd-timesyncd` ist auf **beiden** Pis maskiert (kein NTP), Zeitzone auf **beiden** Pis auf `UTC` gesetzt, und ein eigener Dienst `messecar-clock-baseline.service` setzt die Uhr bei jedem Boot **nach** `fake-hwclock`/`systemd-timesyncd`, aber **vor** dem jeweiligen App-Dienst, auf einen festen Anker (`2026-01-01 00:00:00 UTC`). Dadurch zählen beide Pis nach jedem Neustart ab demselben Zeitpunkt hoch (nur wenige Sekunden Boot-Zeit-Versatz zwischen den Pis, real getestet über mehrere Neustarts) statt zufälliger/abweichender Kalenderzeiten zu zeigen.
+
+- Skript: `fahrzeugsteuerung-pi4/systemd/messecar-clock-baseline.sh` bzw. `datenbank-pi4/systemd/messecar-clock-baseline.sh` (identisch)
+- Unit: `messecar-clock-baseline.service` in denselben Ordnern, `Before=messeauto.service` bzw. `Before=messeauto-database.service`
+- Konsequenz: Zeitstempel in Logs/DB sind **nicht die echte Kalenderzeit**, sondern relativ zum letzten Boot. Sobald zuverlässiges Internet auf beiden Pis dauerhaft verfügbar ist, kann `systemd-timesyncd` wieder entmaskiert werden.

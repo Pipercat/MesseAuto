@@ -1,0 +1,12 @@
+[Unit]
+Description=MesseCar feste Boot-Zeitbasis (kein zuverlaessiges NTP verfuegbar)
+After=fake-hwclock.service systemd-timesyncd.service time-sync.target
+Before=messeauto-database.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/messecar-clock-baseline.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
