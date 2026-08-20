@@ -290,22 +290,30 @@ void homeSpeedControl() {
   Serial.println(" Grad).");
 }
 
+void handleDirectionSerial(const String &cmd);
+
+// Gemeinsamer Serial-Handler: Zahl 0-100 -> Dial B (Geschwindigkeit),
+// "L"/"R" -> Dial A (Fahrtrichtung).
 void handleSpeedControlSerial() {
   static String line;
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
     if (c == '\n' || c == '\r') {
       if (line.length() > 0) {
-        int value = line.toInt();
-        value = constrain(value, 0, 100);
-        speedTargetPercent = value;
-        speedHolding = false;
-        Serial.print("Neuer Sollwert: ");
-        Serial.print(speedTargetPercent);
-        Serial.println("%");
+        if (line == "L" || line == "l" || line == "R" || line == "r") {
+          handleDirectionSerial(line);
+        } else {
+          int value = line.toInt();
+          value = constrain(value, 0, 100);
+          speedTargetPercent = value;
+          speedHolding = false;
+          Serial.print("Neuer Sollwert: ");
+          Serial.print(speedTargetPercent);
+          Serial.println("%");
+        }
         line = "";
       }
-    } else if (isDigit(c)) {
+    } else if (isDigit(c) || c == 'L' || c == 'l' || c == 'R' || c == 'r') {
       line += c;
     }
   }
@@ -373,6 +381,147 @@ void updateSpeedControl(uint32_t now) {
   stepOnce(stepper1, dir);
 }
 
+// ---------- Fahrtrichtung (Sensor2 + Stepper2), MA-10-009 bis MA-10-012 ----------
+//
+// Nur zwei gueltige Zustaende: LEFT oder RIGHT, kein kontinuierlicher Wert wie
+// bei der Geschwindigkeit. RIGHT ist der feste, real gemessene Referenzwinkel
+// (Boot-Ausgangszustand); LEFT liegt 90 Grad davon entfernt (frei gewaehlt,
+// kein Anschlag vorhanden). Umschaltschwelle in der Mitte (45 Grad) mit
+// Hysterese, damit die Mittelzone kein Hin-und-Her zwischen den Zustaenden
+// ausloest (MA-10-009: "Zwischenbereich kein neuer Fahrbefehl").
+//
+// Messwerte (Sensor2+Stepper2, 20.08.2026): HOME_RIGHT_RAW_ANGLE=2380
+// (=209.18 Grad, ueber 21 Messungen ohne Streuung). DEG_PER_STEP2 aus
+// 600-Schritt-Einzelmessung: -0.1261 Grad/Schritt.
+constexpr uint16_t HOME_RIGHT_RAW_ANGLE = 2380;
+constexpr float HOME_RIGHT_ANGLE_DEG = (HOME_RIGHT_RAW_ANGLE * 360.0f) / 4096.0f;
+constexpr float DEG_PER_STEP2 = -0.1261f;
+constexpr float DIRECTION_RANGE_DEG = 90.0f;       // RIGHT->LEFT Abstand, frei gewaehlt
+constexpr float DIRECTION_TOLERANCE_DEG = 4.0f;
+constexpr float DIRECTION_HYSTERESIS_DEG = 12.0f;  // Sicherheitsabstand um die Mittelzone
+
+// true = LEFT, false = RIGHT (kein enum class - Arduinos automatische
+// Prototyp-Generierung kommt mit scoped enums in Funktionssignaturen nicht
+// zuverlaessig klar).
+bool directionControlHomed = false;
+bool currentDirectionIsLeft = false;
+bool directionHolding = false;
+uint32_t lastDirectionStepAt = 0;
+
+float direction2SignedRangeDeg() {
+  return DEG_PER_STEP2 * fabsf(DIRECTION_RANGE_DEG / DEG_PER_STEP2);
+}
+
+float directionTargetDeg(bool isLeft) {
+  return HOME_RIGHT_ANGLE_DEG + (isLeft ? direction2SignedRangeDeg() : 0.0f);
+}
+
+// Faehrt Stepper2 blockierend zu RIGHT (Referenz) - fester, sicherer
+// Ausgangszustand bei jedem Boot, unabhaengig von der letzten Position.
+void homeDirectionControl() {
+  Serial.println("--- Homing Fahrtrichtung (Sensor2+Stepper2) -> RIGHT ---");
+  float currentDeg;
+  if (!readAngleDeg(busSensor2, currentDeg)) {
+    Serial.println("Homing FEHLGESCHLAGEN: Sensor2 nicht lesbar.");
+    return;
+  }
+
+  uint32_t start = millis();
+  while (millis() - start < HOMING_TIMEOUT_MS) {
+    if (!readAngleDeg(busSensor2, currentDeg)) {
+      Serial.println("Homing FEHLGESCHLAGEN: Sensor2-Lesefehler waehrend der Fahrt.");
+      return;
+    }
+    float error = angleDiff(currentDeg, HOME_RIGHT_ANGLE_DEG);
+    if (fabsf(error) <= DIRECTION_TOLERANCE_DEG) {
+      break;
+    }
+    bool wantIncrease = error > 0;
+    bool forwardIncreases = DEG_PER_STEP2 >= 0;
+    int dir = (wantIncrease == forwardIncreases) ? 1 : -1;
+    stepOnce(stepper2, dir);
+    delay(STEP_INTERVAL_MS);
+  }
+  stepperOff(stepper2);
+
+  float finalDeg;
+  readAngleDeg(busSensor2, finalDeg);
+  float finalError = angleDiff(finalDeg, HOME_RIGHT_ANGLE_DEG);
+  if (fabsf(finalError) > DIRECTION_TOLERANCE_DEG) {
+    Serial.print("Homing FEHLGESCHLAGEN: RIGHT nicht innerhalb Toleranz erreicht (Rest-Fehler ");
+    Serial.print(finalError, 2);
+    Serial.println(" Grad).");
+    return;
+  }
+
+  currentDirectionIsLeft = false;
+  directionControlHomed = true;
+  Serial.print("Homing OK: RIGHT bei ");
+  Serial.print(finalDeg, 2);
+  Serial.println(" Grad.");
+}
+
+void setDirectionTarget(bool isLeft, const char *reason) {
+  if (currentDirectionIsLeft == isLeft) {
+    return;
+  }
+  currentDirectionIsLeft = isLeft;
+  directionHolding = false;
+  Serial.print(reason);
+  Serial.println(isLeft ? ": LEFT" : ": RIGHT");
+}
+
+void handleDirectionSerial(const String &cmd) {
+  if (cmd == "L" || cmd == "l") {
+    setDirectionTarget(true, "Neuer Sollwert");
+  } else if (cmd == "R" || cmd == "r") {
+    setDirectionTarget(false, "Neuer Sollwert");
+  }
+}
+
+// MA-10-011: manuelle Drehung erst nach sicherer Schwellenueberschreitung
+// (Hysterese) als neue Richtung uebernehmen, Mittelzone loest nichts aus.
+void updateDirectionControl(uint32_t now) {
+  if (!directionControlHomed) {
+    return;
+  }
+  if (now - lastDirectionStepAt < SPEED_STEP_INTERVAL_MS) {
+    return;
+  }
+
+  float currentDeg;
+  if (!readAngleDeg(busSensor2, currentDeg)) {
+    return;
+  }
+
+  if (directionHolding) {
+    float rangeSigned = direction2SignedRangeDeg();
+    float ratio = angleDiff(HOME_RIGHT_ANGLE_DEG, currentDeg) / rangeSigned;  // 0=RIGHT, 1=LEFT
+    float hystRatio = DIRECTION_HYSTERESIS_DEG / fabsf(rangeSigned);
+    if (ratio > 0.5f + hystRatio) {
+      setDirectionTarget(true, "Manuell gedreht");
+    } else if (ratio < 0.5f - hystRatio) {
+      setDirectionTarget(false, "Manuell gedreht");
+    }
+    return;
+  }
+
+  float targetDeg = directionTargetDeg(currentDirectionIsLeft);
+  float error = angleDiff(currentDeg, targetDeg);
+
+  if (fabsf(error) <= DIRECTION_TOLERANCE_DEG) {
+    stepperOff(stepper2);
+    directionHolding = true;
+    return;
+  }
+
+  lastDirectionStepAt = now;
+  bool wantIncrease = error > 0;
+  bool forwardIncreases = DEG_PER_STEP2 >= 0;
+  int dir = (wantIncrease == forwardIncreases) ? 1 : -1;
+  stepOnce(stepper2, dir);
+}
+
 void setup() {
   Serial.begin(115200);
   delay(300);
@@ -392,17 +541,16 @@ void setup() {
   scanBus(busSensor2, "Sensor2");
 
   homeSpeedControl();
-  Serial.println("Sollwert 0-100 per Serial eingeben (Zahl + Enter) zum Testen.");
+  homeDirectionControl();
+  Serial.println("Sollwert 0-100 (Dial B) bzw. L/R (Dial A) per Serial eingeben (+Enter) zum Testen.");
 }
-
-constexpr uint32_t STEPPER2_RUN_DURATION_MS = 4000;
 
 void loop() {
   uint32_t now = millis();
 
   handleSpeedControlSerial();
   updateSpeedControl(now);
-  updateStepper(stepper2, now, now < STEPPER2_RUN_DURATION_MS);
+  updateDirectionControl(now);
 
   if (now - lastPrintAt >= PRINT_INTERVAL_MS) {
     lastPrintAt = now;

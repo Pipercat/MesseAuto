@@ -115,6 +115,19 @@ Beide Stepper haben eine **eigene 5V-Versorgung, getrennt vom ESP32-USB-Rail** (
 | Stepper 1 | GPIO 25 | GPIO 26 | GPIO 27 | GPIO 14 |
 | Stepper 2 | GPIO 32 | GPIO 4 | GPIO 16 | GPIO 17 |
 
+### Homing und feste Referenzwinkel (Sensor1+Stepper1, Sensor2+Stepper2)
+
+Da an keinem der beiden Regler ein mechanischer Anschlag existiert, braucht jeder Regler einen fest hinterlegten, real gemessenen Referenzwinkel statt der Boot-Position. Bei jedem Boot fährt die Firmware geschlossen-geregelt (per AS5600) aktiv zu dieser Referenz zurück ("Homing"), unabhängig davon wo der Regler zuletzt stehengeblieben ist. Grund: die vorherige Version kalibrierte bei jedem Boot neu per Testbewegung (open-loop, Rückweg nie über den Sensor verifiziert) — verlorene Schritte verschoben die Referenz bei jedem Neustart minimal.
+
+| Regler | Referenz | Wert | Übersetzung (real gemessen) |
+|---|---|---|---|
+| Dial B (Sensor1+Stepper1, Geschwindigkeit 0-100%) | 0%-Referenzwinkel | raw=3901 (342,86°) | -0,0917 Grad/Schritt |
+| Dial A (Sensor2+Stepper2, Fahrtrichtung LEFT/RIGHT) | RIGHT-Referenzwinkel | raw=2380 (209,18°) | -0,1261 Grad/Schritt |
+
+Dial A: LEFT liegt 90° von RIGHT entfernt (frei gewählt), Umschaltschwelle bei 45° mit ±12° Hysterese, damit die Mittelzone kein Hin-und-Her auslöst (MA-10-009).
+
+Real getestet (20.08.2026): nach absichtlicher Verschiebung fand Dial B beim Neustart innerhalb der 4°-Toleranz wieder zur Referenz zurück; Dial A erreichte LEFT/RIGHT jeweils mit unter 4° Restfehler.
+
 ### Bekannte Board-Eigenheit: instabile Crystal-Frequenz
 
 `esptool` meldet bei diesem Board wiederholt `Warning: Detected crystal freq 15.55 MHz is quite different to normalized freq 26 MHz. Unsupported crystal in use?`. Dadurch schlägt die interne Hash-Verifikation nach dem Schreiben regelmäßig mit `Serial data stream stopped: Possible serial noise or corruption` fehl, obwohl der eigentliche Schreibvorgang (100% geschrieben) korrekt war. Verlässlicher Nachweis für einen erfolgreichen Flash-Vorgang ist bei diesem Board daher ein **funktionaler Boot-Test** (Reset + Serial-Log prüfen), nicht die esptool-interne Verifikation.
