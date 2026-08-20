@@ -8,10 +8,13 @@
 // Beide Stepper eigene 5V-Versorgung (getrennt vom ESP32-USB-Rail, GND gemeinsam).
 //
 // Geschwindigkeitsregler (nur Sensor1+Stepper1, siehe M10 "Geschwindigkeit"):
-// Kein mechanischer Anschlag am Regler vorhanden -> 0% = Position beim Boot,
-// 100% = 175 Grad davon entfernt (Sollbereich, frei gewaehlt). Uebersetzung
-// Motor->Zahnrad->Regler ist unbekannt und wird beim Boot einmalig real
-// ausgemessen (kurze Testbewegung + Winkel-Differenz), nicht geraten.
+// Kein mechanischer Anschlag am Regler vorhanden -> 0% = fester Referenzwinkel
+// HOME_ANGLE_DEG (einmalig real gemessen, siehe Kommentar dort), 100% = 175
+// Grad davon entfernt (Sollbereich, frei gewaehlt). Bei jedem Boot faehrt der
+// Regler aktiv per Sensor-Rueckmeldung zu diesem festen Referenzwinkel zurueck
+// ("Homing") - unabhaengig davon wo er zuletzt stehengeblieben ist. Die
+// Motor->Zahnrad->Regler-Uebersetzung (DEG_PER_STEP) ist ebenfalls einmalig
+// real ausgemessen und fest hinterlegt, nicht geraten.
 // Sollwert 0-100 ueber Serial eingeben (Zahl + Enter).
 
 #include <Wire.h>
@@ -202,72 +205,89 @@ void printAS5600(const char *label, TwoWire &bus) {
 }
 
 // ---------- Geschwindigkeitsregler (Sensor1 + Stepper1) ----------
+//
+// Frueher wurde die Motor->Getriebe->Regler-Uebersetzung bei JEDEM Boot per
+// Testbewegung (300 Schritte vor, 300 zurueck) neu gemessen - komplett
+// open-loop, ohne den Rueckweg per Sensor zu verifizieren. Verlor der Motor
+// dabei auch nur einen Schritt (Getriebespiel/Reibung), landete die 0%-
+// Referenz nicht mehr exakt am alten Platz - das war die Hauptursache dafuer,
+// dass sich der Regler "mal wieder aus Versehen verdreht" hat.
+//
+// Neues Konzept: AS5600 liefert einen ABSOLUTEN Winkel (kein Zaehler), wir
+// brauchen also keine Anfahrt zu einem Schalter wie bei klassischem Homing.
+// Stattdessen: HOME_RAW_ANGLE und DEG_PER_STEP sind einmalig real vermessen
+// und fest im Code hinterlegt (nicht geraten, siehe Messwerte unten). Bei
+// jedem Boot faehrt der Regler aktiv per Sensor-Rueckmeldung exakt dorthin
+// zurueck ("Homing"), unabhaengig davon wo er zuletzt stehengeblieben ist.
+//
+// Messwerte (Sensor1+Stepper1, 20.08.2026): HOME_RAW_ANGLE=3901 (=342.83 Grad)
+// bei stillstehendem Regler ueber 21 Messungen ohne Streuung. DEG_PER_STEP aus
+// drei unabhaengigen 300-Schritt-Messungen gemittelt (-0.1014, -0.0835,
+// -0.0902 Grad/Schritt) = -0.0917 Grad/Schritt.
+constexpr uint16_t HOME_RAW_ANGLE = 3901;
+constexpr float HOME_ANGLE_DEG = (HOME_RAW_ANGLE * 360.0f) / 4096.0f;
+constexpr float DEG_PER_STEP = -0.0917f;
 
 constexpr float SPEED_RANGE_DEG = 175.0f;  // 0-100% Sollbereich, frei gewaehlt (kein Anschlag)
-constexpr int CALIBRATION_TEST_STEPS = 300;
 // AS5600 laeuft hier bei AGC=128/128 (Magnetfeld zu schwach, siehe HARDWARE.md) und
 // rauscht dadurch mehrere Grad um den Ruhewert - Toleranz muss deutlich groesser als
 // dieses Rauschen sein, sonst haelt der Regelkreis nie an (staendiges Nachkorrigieren).
 constexpr float POSITION_TOLERANCE_DEG = 4.0f;
 constexpr float MANUAL_DEADBAND_DEG = 7.0f;
 constexpr uint32_t SPEED_STEP_INTERVAL_MS = 4;
+constexpr uint32_t HOMING_TIMEOUT_MS = 15000;
 
 bool speedControlCalibrated = false;
-float speedZeroAngleDeg = 0.0f;
-float speedDegPerStep = 0.0f;
 int speedTargetPercent = 0;
 uint32_t lastSpeedStepAt = 0;
 bool speedHolding = false;
 float speedHoldAngleDeg = 0.0f;
 
-void calibrateSpeedControl() {
-  Serial.println("--- Kalibrierung Geschwindigkeitsregler (Sensor1+Stepper1) ---");
-  float startDeg;
-  if (!readAngleDeg(busSensor1, startDeg)) {
-    Serial.println("Kalibrierung FEHLGESCHLAGEN: Sensor1 nicht lesbar.");
+// Faehrt Stepper1 blockierend und geschlossen-regelnd (per Sensor1) exakt auf
+// HOME_ANGLE_DEG. Laeuft einmalig beim Boot, bevor der normale Regelkreis
+// startet - garantiert dieselbe physische Ausgangsposition bei jedem Start.
+void homeSpeedControl() {
+  Serial.println("--- Homing Geschwindigkeitsregler (Sensor1+Stepper1) ---");
+  float currentDeg;
+  if (!readAngleDeg(busSensor1, currentDeg)) {
+    Serial.println("Homing FEHLGESCHLAGEN: Sensor1 nicht lesbar.");
     return;
   }
 
-  for (int i = 0; i < CALIBRATION_TEST_STEPS; i++) {
-    stepOnce(stepper1, 1);
-    delay(STEP_INTERVAL_MS);
-  }
-  delay(50);
-
-  float endDeg;
-  if (!readAngleDeg(busSensor1, endDeg)) {
-    Serial.println("Kalibrierung FEHLGESCHLAGEN: Sensor1 nach Testbewegung nicht lesbar.");
-    return;
-  }
-
-  float delta = angleDiff(startDeg, endDeg);
-
-  // Zurueck zur Startposition (Startpunkt bleibt 0%-Referenz).
-  for (int i = 0; i < CALIBRATION_TEST_STEPS; i++) {
-    stepOnce(stepper1, -1);
+  uint32_t start = millis();
+  while (millis() - start < HOMING_TIMEOUT_MS) {
+    if (!readAngleDeg(busSensor1, currentDeg)) {
+      Serial.println("Homing FEHLGESCHLAGEN: Sensor1-Lesefehler waehrend der Fahrt.");
+      return;
+    }
+    float error = angleDiff(currentDeg, HOME_ANGLE_DEG);
+    if (fabsf(error) <= POSITION_TOLERANCE_DEG) {
+      break;
+    }
+    bool wantIncrease = error > 0;
+    bool forwardIncreases = DEG_PER_STEP >= 0;
+    int dir = (wantIncrease == forwardIncreases) ? 1 : -1;
+    stepOnce(stepper1, dir);
     delay(STEP_INTERVAL_MS);
   }
   stepperOff(stepper1);
 
-  if (fabsf(delta) < 0.5f) {
-    Serial.println("Kalibrierung FEHLGESCHLAGEN: keine messbare Winkelaenderung (Stepper dreht nicht durch/Sensor haengt fest?).");
+  float finalDeg;
+  readAngleDeg(busSensor1, finalDeg);
+  float finalError = angleDiff(finalDeg, HOME_ANGLE_DEG);
+  if (fabsf(finalError) > POSITION_TOLERANCE_DEG) {
+    Serial.print("Homing FEHLGESCHLAGEN: Ziel nicht innerhalb Toleranz erreicht (Rest-Fehler ");
+    Serial.print(finalError, 2);
+    Serial.println(" Grad). Stepper haengt fest oder Getriebe rutscht?");
     return;
   }
 
-  speedDegPerStep = delta / CALIBRATION_TEST_STEPS;
-  speedZeroAngleDeg = startDeg;
   speedControlCalibrated = true;
-
-  float stepsFor175 = fabsf(SPEED_RANGE_DEG / speedDegPerStep);
-  Serial.print("Kalibrierung OK: ");
-  Serial.print(CALIBRATION_TEST_STEPS);
-  Serial.print(" Schritte = ");
-  Serial.print(delta, 2);
-  Serial.print(" Grad -> ");
-  Serial.print(speedDegPerStep, 4);
-  Serial.print(" Grad/Schritt, 175 Grad = ");
-  Serial.print(stepsFor175, 0);
-  Serial.println(" Schritte.");
+  Serial.print("Homing OK: Winkel jetzt ");
+  Serial.print(finalDeg, 2);
+  Serial.print(" Grad (Ziel ");
+  Serial.print(HOME_ANGLE_DEG, 2);
+  Serial.println(" Grad).");
 }
 
 void handleSpeedControlSerial() {
@@ -291,14 +311,14 @@ void handleSpeedControlSerial() {
   }
 }
 
-// sign(speedDegPerStep) * SPEED_RANGE_DEG: Drehrichtung wie bei der Kalibrierung.
+// sign(DEG_PER_STEP) * SPEED_RANGE_DEG: Drehrichtung wie bei der Kalibrierung.
 float speedSignedRangeDeg() {
-  return speedDegPerStep * fabsf(SPEED_RANGE_DEG / speedDegPerStep);
+  return DEG_PER_STEP * fabsf(SPEED_RANGE_DEG / DEG_PER_STEP);
 }
 
 int percentFromAngle(float deg) {
   float signedRange = speedSignedRangeDeg();
-  float percent = (angleDiff(speedZeroAngleDeg, deg) / signedRange) * 100.0f;
+  float percent = (angleDiff(HOME_ANGLE_DEG, deg) / signedRange) * 100.0f;
   return constrain((int)roundf(percent), 0, 100);
 }
 
@@ -333,7 +353,7 @@ void updateSpeedControl(uint32_t now) {
     return;
   }
 
-  float targetDeg = speedZeroAngleDeg + speedSignedRangeDeg() * (speedTargetPercent / 100.0f);
+  float targetDeg = HOME_ANGLE_DEG + speedSignedRangeDeg() * (speedTargetPercent / 100.0f);
   float error = angleDiff(currentDeg, targetDeg);
 
   if (fabsf(error) <= POSITION_TOLERANCE_DEG) {
@@ -346,9 +366,9 @@ void updateSpeedControl(uint32_t now) {
   lastSpeedStepAt = now;
   // error>0 heisst: Zielwinkel liegt "vorwaerts" (in Richtung steigender Grad ueber
   // angleDiff) von der aktuellen Position aus gesehen. Vorwaerts-Schritt (dir=+1)
-  // aendert den Winkel um speedDegPerStep; Vorzeichen von speedDegPerStep beruecksichtigen.
+  // aendert den Winkel um DEG_PER_STEP; Vorzeichen von DEG_PER_STEP beruecksichtigen.
   bool wantIncrease = error > 0;
-  bool forwardIncreases = speedDegPerStep >= 0;
+  bool forwardIncreases = DEG_PER_STEP >= 0;
   int dir = (wantIncrease == forwardIncreases) ? 1 : -1;
   stepOnce(stepper1, dir);
 }
@@ -371,7 +391,7 @@ void setup() {
   scanBus(busSensor1, "Sensor1");
   scanBus(busSensor2, "Sensor2");
 
-  calibrateSpeedControl();
+  homeSpeedControl();
   Serial.println("Sollwert 0-100 per Serial eingeben (Zahl + Enter) zum Testen.");
 }
 
